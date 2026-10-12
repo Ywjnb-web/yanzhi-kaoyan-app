@@ -1,0 +1,111 @@
+/**
+ * 接口路径常量
+ *
+ * 与 `deliverables/backend/API-契约-研志-V1.0.md` §8「接口一览表」一一对应。
+ * **改路径只改这里**，页面与 remote 层不出现裸字符串。
+ *
+ * 带路径参数的接口提供函数式构造器（见文件末尾），避免各调用点自己拼字符串
+ * 拼出 `/plans//marks` 这类脏 URL。
+ */
+
+/** 路径前缀。BASE_URL 已含 /api/v1，此处保持空串便于将来加版本段。 */
+export const API_PREFIX: string = ''
+
+/* ══════════════════════════════════════════════════════════════
+   Identity & Access（FR-10）
+   ══════════════════════════════════════════════════════════════ */
+
+export const EP_AUTH_LOGIN: string = '/auth/wechat/login'
+export const EP_AUTH_REFRESH: string = '/auth/refresh'
+export const EP_AUTH_LOGOUT: string = '/auth/logout'
+export const EP_CANDIDATE_ME: string = '/candidates/me'
+export const EP_CANDIDATE_DELETE_DATA: string = '/candidates/me/data'
+export const EP_CANDIDATE_EXPORT: string = '/candidates/me/export'
+
+/* ══════════════════════════════════════════════════════════════
+   Meta（字典与数据版本）
+   ══════════════════════════════════════════════════════════════ */
+
+export const EP_META_DICTIONARIES: string = '/meta/dictionaries'
+export const EP_META_DATA_VERSION: string = '/meta/data-version'
+
+/* ══════════════════════════════════════════════════════════════
+   ExamProfile（FR-01 / FR-02）
+   ══════════════════════════════════════════════════════════════ */
+
+export const EP_EXAM_PROFILE: string = '/exam-profile'
+export const EP_EXAM_VALIDATE: string = '/exam-profile/validate'
+export const EP_EXAM_PREFERENCE: string = '/exam-profile/preference'
+
+/* ══════════════════════════════════════════════════════════════
+   ProgramCatalog（FR-03）
+   ══════════════════════════════════════════════════════════════ */
+
+export const EP_CATALOG_CHIPS: string = '/catalog/chips'
+export const EP_CATALOG_PROGRAMS: string = '/catalog/programs'
+export const EP_CATALOG_SCHOOLS: string = '/catalog/schools'
+
+/* ══════════════════════════════════════════════════════════════
+   PlanGeneration（FR-04 / FR-05 / FR-06 / FR-07）
+   ══════════════════════════════════════════════════════════════ */
+
+export const EP_PLAN_GENERATE: string = '/plans/generate'
+export const EP_PLAN_LIST: string = '/plans'
+export const EP_PLAN_IMPORT: string = '/plans/import'
+
+/* ══════════════════════════════════════════════════════════════
+   Feedback & Compliance（FR-09 / FR-08）
+   ══════════════════════════════════════════════════════════════ */
+
+export const EP_FEEDBACK: string = '/feedbacks'
+export const EP_DISCLAIMER: string = '/compliance/disclaimer'
+export const EP_DISCLAIMER_ACCEPT: string = '/compliance/disclaimer/accept'
+
+/* ══════════════════════════════════════════════════════════════
+   带路径参数的构造器
+   ══════════════════════════════════════════════════════════════ */
+
+/** GET /catalog/programs/{programId} */
+export function epProgramDetail(programId: string): string {
+  return '/catalog/programs/' + programId
+}
+
+/** GET /plans/generate-tasks/{taskId} */
+export function epGenerateTask(taskId: string): string {
+  return '/plans/generate-tasks/' + taskId
+}
+
+/** GET /plans/{planId} */
+export function epPlanDetail(planId: string): string {
+  return '/plans/' + planId
+}
+
+/** PUT /plans/{planId}/marks */
+export function epPlanMarks(planId: string): string {
+  return '/plans/' + planId + '/marks'
+}
+
+/** DELETE /plans/{planId}/marks/{programId} */
+export function epPlanMark(planId: string, programId: string): string {
+  return '/plans/' + planId + '/marks/' + programId
+}
+
+/** POST /plans/{planId}/regenerate */
+export function epPlanRegenerate(planId: string): string {
+  return '/plans/' + planId + '/regenerate'
+}
+
+/** POST /plans/{planId}/export */
+export function epPlanExport(planId: string): string {
+  return '/plans/' + planId + '/export'
+}
+
+/** GET /plans/{planId}/export/{exportId} */
+export function epPlanExportResult(planId: string, exportId: string): string {
+  return '/plans/' + planId + '/export/' + exportId
+}
+
+/** GET /candidates/me */
+export function epCandidateData(): string {
+  return EP_CANDIDATE_ME
+}

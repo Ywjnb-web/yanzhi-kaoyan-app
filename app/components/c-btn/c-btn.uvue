@@ -1,0 +1,87 @@
+<template>
+  <view
+    class="w-full flex flex-row items-center justify-center"
+    :class="wrapClass"
+    @click="onTap"
+  >
+    <text class="font-semibold" :class="textClass">{{ label }}</text>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 按钮
+ *
+ * primary   —— 深色实心，只留给页面唯一主操作（CTA）
+ * secondary —— 描边，用于并列的次要操作
+ * ghost     —— 纯文字，用于「取消生成」「清空标记」这类弱操作
+ */
+import { computed } from 'vue'
+
+const props = defineProps<{
+  label: string
+  /** primary / secondary / ghost */
+  variant?: string
+  /** lg = 52px（主操作） / md = 44px / sm = 34px */
+  size?: string
+  disabled?: boolean
+}>()
+
+const emit = defineEmits(['press'])
+
+const variant = computed<string>((): string =>
+  props.variant != null ? props.variant : 'primary',
+)
+const size = computed<string>((): string => (props.size != null ? props.size : 'lg'))
+const disabled = computed<boolean>((): boolean =>
+  props.disabled != null ? props.disabled : false,
+)
+
+const wrapClass = computed<string>((): string => {
+  const parts: string[] = ['rounded-btn']
+
+  if (size.value === 'lg') {
+    parts.push('h-[52px]')
+  } else if (size.value === 'md') {
+    parts.push('h-[44px]')
+  } else {
+    parts.push('h-[34px]')
+  }
+
+  if (disabled.value) {
+    parts.push('bg-mute')
+  } else if (variant.value === 'primary') {
+    parts.push('bg-ink')
+  } else if (variant.value === 'secondary') {
+    parts.push('bg-white border border-solid border-line2')
+  } else {
+    parts.push('bg-transparent')
+  }
+
+  return parts.join(' ')
+})
+
+const textClass = computed<string>((): string => {
+  const sizeCls: string = size.value === 'lg' ? 'text-h3' : size.value === 'md' ? 'text-lead' : 'text-body'
+
+  if (disabled.value) {
+    return sizeCls + ' text-white'
+  }
+  if (variant.value === 'primary') {
+    return sizeCls + ' text-white'
+  }
+  if (variant.value === 'secondary') {
+    return sizeCls + ' font-medium text-ink'
+  }
+  return 'text-sub font-medium text-ink2'
+})
+
+function onTap() {
+  if (disabled.value) {
+    uni.showToast({ title: '请先完成必填项', icon: 'none' })
+    return
+  }
+  // 事件名刻意避开 tap：小程序端组件事件与原生事件同名会重复触发
+  emit('press')
+}
+</script>

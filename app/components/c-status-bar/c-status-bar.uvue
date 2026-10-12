@@ -1,0 +1,18 @@
+<template>
+  <view class="w-full bg-white" :style="boxStyle" />
+</template>
+
+<script setup lang="uts">
+/**
+ * 系统状态栏占位。
+ * 页面使用 navigationStyle: custom 后，需要自己为状态栏留出高度，
+ * 否则内容会顶到刘海/时间区域下面。
+ */
+import { computed } from 'vue'
+
+const boxStyle = computed<string>((): string => {
+  const info = uni.getSystemInfoSync()
+  const h: number = info.statusBarHeight != null ? info.statusBarHeight : 20
+  return 'height:' + h.toString() + 'px'
+})
+</script>

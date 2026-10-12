@@ -1,0 +1,115 @@
+/**
+ * 接口环境配置
+ *
+ * ══ 这是接入真后端的唯一开关 ══
+ *
+ * 后端就位后，只需把 `USE_MOCK` 置为 false、把 `BASE_URL` 换成真实网关，
+ * 页面再逐页迁到 `api/remote.uts` 的异步接口即可。其余代码零改动。
+ *
+ * 约定（与 PRD 第十一章一致）：
+ *   · accessToken 有效期 2 小时，refreshToken 30 天；
+ *   · 游客身份靠设备 ID 识别，未登录也能完整走通主链路（FR-10 游客可用）；
+ *   · 任何凭证都不写日志、不拼进 URL。
+ */
+
+/**
+ * 是否使用本地 Mock 数据。
+ *
+ * true  → 页面继续使用 `api/index.uts` 的同步实现（本地假数据 + 本地缓存），
+ *         主链路完全跑得通，无需任何服务器。
+ * false → 改用 `api/remote.uts` 的异步实现，走真实后端。
+ */
+export const USE_MOCK: boolean = true
+
+/** 后端网关地址（线上）。必须 HTTPS，且已在微信公众平台登记 request 合法域名。 */
+export const BASE_URL: string = 'https://api.yanzhi.example.com/api/v1'
+
+/** 本地联调地址。调试时可临时把 BASE_URL 指向它，并勾选「不校验合法域名」。 */
+export const BASE_URL_LOCAL: string = 'http://localhost:8080/api/v1'
+
+/** 请求超时（毫秒）。生成接口另走异步任务轮询，不受此限制。 */
+export const TIMEOUT: number = 15000
+
+/** 生成进度轮询间隔与最大次数（S04 生成中页面） */
+export const POLL_INTERVAL: number = 1200
+export const POLL_MAX_TIMES: number = 30
+
+const KEY_DEVICE_ID: string = 'yanzhi.deviceId'
+const KEY_ACCESS: string = 'yanzhi.accessToken'
+const KEY_REFRESH: string = 'yanzhi.refreshToken'
+const KEY_TOKEN_AT: string = 'yanzhi.tokenAt'
+
+/* ══════════════════════════════════════════════════════════════
+   设备 ID —— 游客身份的载体
+   ══════════════════════════════════════════════════════════════ */
+
+function newDeviceId(): string {
+  const t: number = new Date().getTime()
+  const r: number = Math.floor(Math.random() * 1000000000)
+  return 'dev-' + t.toString() + '-' + r.toString()
+}
+
+/** 取设备 ID；首次调用生成并持久化，此后终身不变 */
+export function deviceId(): string {
+  const raw = uni.getStorageSync(KEY_DEVICE_ID)
+  if (raw != null) {
+    const text = raw as string
+    if (text.length > 0) return text
+  }
+  const id: string = newDeviceId()
+  uni.setStorageSync(KEY_DEVICE_ID, id)
+  return id
+}
+
+/* ══════════════════════════════════════════════════════════════
+   令牌读写
+   ══════════════════════════════════════════════════════════════ */
+
+export function accessToken(): string {
+  const raw = uni.getStorageSync(KEY_ACCESS)
+  if (raw == null) return ''
+  return raw as string
+}
+
+export function refreshToken(): string {
+  const raw = uni.getStorageSync(KEY_REFRESH)
+  if (raw == null) return ''
+  return raw as string
+}
+
+export function isLoggedIn(): boolean {
+  return accessToken().length > 0
+}
+
+/** accessToken 到期时间戳（毫秒） */
+export function tokenExpireAt(): number {
+  const raw = uni.getStorageSync(KEY_TOKEN_AT)
+  if (raw == null) return 0
+  const s = raw as string
+  if (s.length === 0) return 0
+  return parseInt(s)
+}
+
+/** 是否已过期或将在 60 秒内过期 —— 提前刷新，避免用户正好卡在临界点 */
+export function isTokenExpiring(): boolean {
+  const at: number = tokenExpireAt()
+  if (at <= 0) return true
+  return new Date().getTime() + 60000 >= at
+}
+
+export function saveTokens(access: string, refresh: string, expiresIn: number) {
+  uni.setStorageSync(KEY_ACCESS, access)
+  uni.setStorageSync(KEY_REFRESH, refresh)
+  const at: number = new Date().getTime() + expiresIn * 1000
+  uni.setStorageSync(KEY_TOKEN_AT, at.toString())
+}
+
+/**
+ * 只清凭证，不动用户数据。
+ * 40103（refresh 失效）时走这里 —— 用户回落到游客态，但方案、档案都还在（FR-10）。
+ */
+export function clearTokens() {
+  uni.removeStorageSync(KEY_ACCESS)
+  uni.removeStorageSync(KEY_REFRESH)
+  uni.removeStorageSync(KEY_TOKEN_AT)
+}

@@ -1,0 +1,110 @@
+<template>
+  <view class="w-full flex flex-col rounded-card border border-solid" :class="cardClass" @click="onTap">
+    <!-- 首行：档位标签 + 院校 · 专业 -->
+    <view class="w-full flex flex-row items-center">
+      <view class="flex flex-row items-center justify-center px-2 rounded-md h-[22px] border border-solid" :class="tagClass">
+        <text class="text-cap font-semibold" :class="tagTextClass">{{ item.tierName }}</text>
+      </view>
+      <text class="flex-1 min-w-0 truncate text-lead font-semibold text-ink ml-2"
+        >{{ item.university }} · {{ item.major }}</text
+      >
+    </view>
+
+    <!-- 专业学制一行 -->
+    <text class="w-full text-note text-ink2 mt-2">{{ metaLine }}</text>
+
+    <!-- 三项事实指标 -->
+    <view class="w-full flex flex-row mt-2.5">
+      <view class="flex-1 flex flex-col">
+        <text class="tnum text-sub font-semibold text-ink">{{ item.scoreLineTrend }}</text>
+        <text class="text-micro text-ink3 mt-0.5">复试线 23/24/25</text>
+      </view>
+      <view class="flex-1 flex flex-col">
+        <text class="tnum text-sub font-semibold text-ink">{{ item.applyRatio }}</text>
+        <text class="text-micro text-ink3 mt-0.5">报录比 2025</text>
+      </view>
+      <view class="flex-1 flex flex-col">
+        <text class="tnum text-sub font-semibold text-ink">{{ quotaText }}</text>
+        <text class="text-micro text-ink3 mt-0.5">统考名额（扣除推免）</text>
+      </view>
+    </view>
+
+    <!-- 概率区间：文案给区间，条形只表达上限 -->
+    <text class="w-full text-cap font-medium text-ink2 mt-3">{{ probabilityLine }}</text>
+    <view class="w-full mt-1.5">
+      <c-progress :percent="item.probabilityHigh" :height="6" />
+    </view>
+
+    <text class="w-full text-note font-medium text-brand mt-3">查看依据与数据来源 →</text>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 推荐项卡片（S05 择校方案）
+ *
+ * 三项指标全部来自院校数据库事实字段，卡片本身不做任何数字计算 ——
+ * 统考名额单独取出、与报录比同级展示，直接回应 PRD P-1「名额不透明」。
+ */
+import { computed } from 'vue'
+import type { RecommendItem } from '../../types/models.uts'
+
+const props = defineProps<{
+  item: RecommendItem
+  /** 是否为当前选中/展开项 */
+  active?: boolean
+}>()
+
+const emit = defineEmits(['detail'])
+
+const cardClass = computed<string>((): string => {
+  const active = props.active != null && props.active
+  return active ? 'border-ink bg-white p-3.5' : 'border-line bg-white p-3.5'
+})
+
+const tagClass = computed<string>((): string => {
+  const k = props.item.tierKey
+  if (k === 'chong') return 'border-ink bg-white'
+  if (k === 'bao') return 'border-ink bg-ink'
+  return 'border-ink3 bg-white'
+})
+
+const tagTextClass = computed<string>((): string => {
+  const k = props.item.tierKey
+  if (k === 'bao') return 'text-white'
+  if (k === 'chong') return 'text-ink'
+  return 'text-ink2'
+})
+
+const metaLine = computed<string>((): string => {
+  const it = props.item
+  return (
+    it.department +
+    ' · ' +
+    it.degreeType +
+    ' · 学制 ' +
+    it.duration +
+    ' · 学费 ' +
+    it.tuition +
+    ' · 复录比 ' +
+    it.reExamRatio
+  )
+})
+
+const quotaText = computed<string>((): string => props.item.quota.toString() + ' 人')
+
+const probabilityLine = computed<string>((): string => {
+  const it = props.item
+  return (
+    '上岸概率 ' +
+    it.probabilityLow.toString() +
+    '% - ' +
+    it.probabilityHigh.toString() +
+    '%（估算，非承诺）'
+  )
+})
+
+function onTap() {
+  emit('detail', props.item.id)
+}
+</script>

@@ -1,0 +1,56 @@
+<template>
+  <view class="w-full flex flex-col rounded-card border border-solid" :class="boxClass">
+    <slot />
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 卡片容器
+ *
+ * variant 语义固定，避免调用方随意拼类名导致视觉走形：
+ *   outline  默认描边卡片
+ *   strong   深色描边（用于「统考名额」这类需要被强调的事实块）
+ *   fill     灰底卡片（免责声明、概率总览）
+ *   soft     浅蓝底（标记汇总）
+ *   dashed   虚线（数据缺失态）
+ */
+import { computed } from 'vue'
+
+const props = defineProps<{
+  /** outline / strong / fill / soft / dashed */
+  variant?: string
+  /** none / sm / md / lg */
+  pad?: string
+}>()
+
+const boxClass = computed<string>((): string => {
+  const parts: string[] = []
+
+  const v: string = props.variant != null ? props.variant : 'outline'
+  if (v === 'strong') {
+    parts.push('border-[1.5px] border-solid border-ink bg-white')
+  } else if (v === 'fill') {
+    parts.push('border-0 bg-fill')
+  } else if (v === 'soft') {
+    parts.push('border-0 bg-brandsoft')
+  } else if (v === 'dashed') {
+    parts.push('border border-dashed border-line2 bg-white')
+  } else {
+    parts.push('border border-solid border-line bg-white')
+  }
+
+  const p: string = props.pad != null ? props.pad : 'md'
+  if (p === 'none') {
+    parts.push('p-0')
+  } else if (p === 'sm') {
+    parts.push('p-3')
+  } else if (p === 'lg') {
+    parts.push('p-[18px]')
+  } else {
+    parts.push('p-3.5')
+  }
+
+  return parts.join(' ')
+})
+</script>

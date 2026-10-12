@@ -1,0 +1,121 @@
+@import "tailwindcss" source(none);
+
+/* ────────────────────────────────────────────────────────────────
+   扫描范围：uni-app x 的页面、组件与可能产生类名的脚本目录
+   （weapp-tailwindcss 依此提取类名）
+
+   最后两条 @source not 是必需的：
+   HBuilderX 的编译产物会落在 unpackage/，若把它纳入扫描范围，
+   产物里的旧类名会反过来污染下一次开发构建。
+   ──────────────────────────────────────────────────────────────── */
+@source "./App.uvue";
+@source "./pages/**/*.{uts,uvue}";
+@source "./components/**/*.{uts,uvue}";
+@source not "./uni_modules/**/*";
+@source not "./unpackage/**/*";
+
+@theme {
+  /* ── 中性色：直接取自线框图的设计令牌 ───────────────────── */
+  --color-ink: #1f2329; /* 正文 / 主操作底色 */
+  --color-ink2: #646a73; /* 次级文字 */
+  --color-ink3: #a6abb3; /* 说明 / 占位文字 */
+  --color-mute: #c9cdd4; /* 未激活描边 */
+  --color-line: #e5e7eb; /* 主分隔线 */
+  --color-line2: #d5d8dd; /* 控件描边 */
+  --color-fill: #f2f3f5; /* 内容块底色 */
+
+  /* ── 品牌色：仅用于注释层与强调块 ──────────────────────── */
+  --color-brand: #2b6cf6;
+  --color-brandsoft: #eaf1fe;
+
+  /* ── 字号阶梯 ──────────────────────────────────────────── */
+  --text-micro: 10px; /* Tab 标签 */
+  --text-cap: 11px; /* 脚注 / 合规文案 */
+  --text-note: 12px; /* 辅助说明 */
+  --text-body: 13px; /* 正文（默认） */
+  --text-sub: 14px; /* 稍强调正文 */
+  --text-lead: 15px; /* 卡片标题 */
+  --text-title: 16px; /* 导航标题 */
+  --text-h3: 18px; /* 数值强调 */
+  --text-h2: 22px; /* 页面主标题 */
+  --text-h1: 26px; /* 首页主文案 */
+
+  /* ── 圆角 ──────────────────────────────────────────────── */
+  --radius-cell: 10px;
+  --radius-btn: 12px;
+  --radius-card: 14px;
+  --radius-panel: 16px;
+  --radius-chip: 999px;
+
+  /* ── 字体 ──────────────────────────────────────────────── */
+  --font-sans: "PingFang SC", "HarmonyOS Sans SC", "Source Han Sans SC",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+}
+
+/**
+ * 页面根节点。
+ * 注意：这里刻意使用字面量而不是 var(--font-sans)，避免依赖 :root 变量的
+ * 平台差异（小程序对 :root 支持不一致）。
+ */
+page {
+  background-color: #ffffff;
+  color: #1f2329;
+  font-family: "PingFang SC", "HarmonyOS Sans SC", "Source Han Sans SC",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* 数字统一使用等宽字形，便于表格纵向对齐 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/**
+ * 吸底操作条
+ * 用 <style> 而不是 Tailwind：需要 position: fixed + env(safe-area-inset-bottom)，
+ * 后者在小程序端只能通过原生 CSS 表达。
+ */
+.bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  background-color: #ffffff;
+}
+
+/**
+ * 底部弹出选择面板（S02 的意向省份 / 本科专业 / 目标院校共用同一个浮层）
+ *
+ * 遮罩与面板是兄弟节点：遮罩 absolute + z-index 1，面板 relative + z-index 2，
+ * 因此点击面板不会穿透到遮罩 —— 不必依赖事件冒泡拦截（小程序端不总可靠）。
+ * z-index 60 高于吸底操作条（10）与底部导航（20）。
+ */
+.picker-root {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 60;
+}
+
+.picker-mask {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  background-color: rgba(31, 35, 41, 0.45);
+}
+
+.picker-panel {
+  position: relative;
+  z-index: 2;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}

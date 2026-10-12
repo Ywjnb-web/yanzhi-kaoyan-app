@@ -1,0 +1,766 @@
+/**
+ * 异步接口层（后端预留）
+ *
+ * ══ 定位 ══
+ * 本文件是**页面接入真后端时唯一需要改调用的地方**。
+ * 每个函数对应 `deliverables/backend/API-契约-研志-V1.0.md` 里的一个接口，
+ * 返回类型与 `types/models.uts` 的领域模型对齐 —— 后端就位后页面不会拿到
+ * 陌生结构，只是从「同步返回」变成「await 返回」。
+ *
+ * ══ 与 api/index.uts 的关系 ══
+ *   · `api/index.uts`  → 同步实现，本地假数据 + 本地缓存。**离线降级也靠它。**
+ *   · `api/remote.uts` → 异步实现，真实后端。
+ * 两者并存，不是替换关系：弱网/断网时页面回落到同步实现，交互仍然可用。
+ *
+ * ══ 迁移顺序建议 ══
+ *   检索页 → 生成链路 → 我的方案 → 反馈
+ * 从只读的开始换，写链路留到最后，避免中途出现半同步半异步的难查问题。
+ */
+import type {
+  ExamForm,
+  ExamInfo,
+  Preference,
+  PlanVO,
+  MarkRecord,
+  SearchItem,
+  YearRow,
+} from '../types/models.uts'
+import type { HttpResult, FieldError } from './http.uts'
+import { USE_MOCK, POLL_INTERVAL, POLL_MAX_TIMES } from './config.uts'
+import { request, requestIdempotent, unwrap, ApiError } from './http.uts'
+import {
+  EP_AUTH_LOGIN,
+  EP_AUTH_REFRESH,
+  EP_AUTH_LOGOUT,
+  EP_CANDIDATE_ME,
+  EP_CANDIDATE_DELETE_DATA,
+  EP_CANDIDATE_EXPORT,
+  EP_META_DICTIONARIES,
+  EP_META_DATA_VERSION,
+  EP_EXAM_PROFILE,
+  EP_EXAM_VALIDATE,
+  EP_EXAM_PREFERENCE,
+  EP_CATALOG_CHIPS,
+  EP_CATALOG_PROGRAMS,
+  EP_CATALOG_SCHOOLS,
+  EP_PLAN_GENERATE,
+  EP_PLAN_LIST,
+  EP_PLAN_IMPORT,
+  EP_FEEDBACK,
+  EP_DISCLAIMER,
+  EP_DISCLAIMER_ACCEPT,
+  epProgramDetail,
+  epGenerateTask,
+  epPlanDetail,
+  epPlanMarks,
+  epPlanMark,
+  epPlanRegenerate,
+  epPlanExport,
+  epPlanExportResult,
+} from './endpoints.uts'
+
+/* ══════════════════════════════════════════════════════════════
+   守卫：Mock 模式下调用会得到一句明确的话，而不是一个莫名超时
+   ══════════════════════════════════════════════════════════════ */
+
+function ensureRemote(): void {
+  if (USE_MOCK) {
+    throw new ApiError(
+      -2,
+      '当前是本地 Mock 模式，请先把 api/config.uts 的 USE_MOCK 置为 false',
+      0,
+      '',
+    )
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   响应模型（契约 §3 ~ §7）
+   ══════════════════════════════════════════════════════════════ */
+
+export interface CandidateVO {
+  id: string
+  nickname: string
+  avatarUrl: string
+  mobileMasked: string
+}
+
+export interface MergeResultVO {
+  plans: number
+  examProfile: boolean
+}
+
+export interface LoginResultVO {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+  candidate: CandidateVO
+  merged: MergeResultVO
+}
+
+export interface DataVersionVO {
+  dataVersion: string
+  publishedAt: string
+  /** demo = 演示数值；official = 院校官方发布 */
+  dataNature: string
+  sourceNote: string
+  notice: string
+}
+
+/** 字典包。provinces 以「A 区 / B 区」为键，属动态键结构，故保持宽松类型 */
+export interface DictionaryBundleVO {
+  version: string
+  provinces: any
+  subjectGroups: any
+  subjectCodes: any
+  majors: string[]
+  tiers: string[]
+  degreeTypes: string[]
+  strategies: string[]
+}
+
+export interface ComputedTotalVO {
+  total: number
+}
+
+export interface ValidateResultVO {
+  valid: boolean
+  errors: FieldError[]
+  computed: ComputedTotalVO
+}
+
+/** 院校选项（对应 FR-01 的目标院校检索） */
+export interface SchoolVO {
+  university: string
+  province: string
+  region: string
+  level: string
+}
+
+export interface ChipListVO {
+  chips: string[]
+  total: number
+}
+
+export interface PageVO {
+  page: number
+  size: number
+  total: number
+  hasNext: boolean
+}
+
+export interface ProgramPageVO extends PageVO {
+  list: SearchItem[]
+}
+
+export interface ProgramDetailVO {
+  id: string
+  university: string
+  province: string
+  region: string
+  department: string
+  major: string
+  majorCode: string
+  majorClass: string
+  degreeType: string
+  duration: string
+  tuition: string
+  planTotal: number
+  recommendedQuota: number
+  examQuota: number
+  history: YearRow[]
+  dataNature: string
+  sourceNote: string
+  noData: boolean
+}
+
+export interface SchoolListVO {
+  list: SchoolVO[]
+}
+
+export interface GenerateSubmitVO {
+  taskId: string
+  status: string
+  estimatedSeconds: number
+}
+
+export interface GenerateTaskVO {
+  taskId: string
+  /** pending / running / succeeded / failed / canceled */
+  status: string
+  stageNo: number
+  stageLabel: string
+  stageDetail: string
+  percent: number
+  /** 成功后才有值，否则为 null */
+  plan: any
+  error: any
+  /** true = 大模型不可用，已降级为纯规则方案，前端必须标注 */
+  degraded: boolean
+}
+
+export interface PlanSummaryVO {
+  id: string
+  name: string
+  createdAt: string
+  examSummary: string
+  dataVersion: string
+  weighted: boolean
+  itemCount: number
+  belowAll: boolean
+}
+
+export interface PlanPageVO extends PageVO {
+  list: PlanSummaryVO[]
+}
+
+export interface MarkResultVO {
+  programId: string
+  value: string
+  ignoreCount: number
+  preferCount: number
+}
+
+export interface ImportResultVO {
+  imported: number
+  skipped: number
+  conflicts: string[]
+}
+
+export interface DeletePlanVO {
+  deleted: boolean
+  planId: string
+}
+
+export interface DeleteDataVO {
+  deletedAt: string
+  retentionDays: number
+}
+
+export interface DisclaimerVO {
+  version: string
+  content: string
+  updatedAt: string
+  mustAccept: boolean
+}
+
+export interface FeedbackCreatedVO {
+  id: string
+}
+
+export interface ExportStartVO {
+  exportId: string
+  status: string
+}
+
+export interface ExportResultVO {
+  status: string
+  /** 未就绪时为空串 */
+  fileUrl: string
+  expiresAt: string
+}
+
+/* ══════════════════════════════════════════════════════════════
+   请求体模型
+   ══════════════════════════════════════════════════════════════ */
+
+interface ExamProfileBody {
+  provinces: string[]
+  subjectCode: string
+  subjectGroup: string
+  tier: string
+  major: string
+  targetSchool: string
+  isCross: boolean
+  politics: string
+  foreign: string
+  course1: string
+  course2: string
+  /** 用户手填的总分，用于服务端比对（EX-02）；不填传 0 */
+  declaredTotal: number
+}
+
+interface GenerateBody {
+  exam: ExamInfo
+  preference: Preference
+  marks: MarkRecord[]
+  planId: string
+}
+
+interface MarkBody {
+  programId: string
+  value: string
+}
+
+interface PreferenceBody {
+  strategies: string[]
+  regions: string[]
+  directions: string[]
+  careers: string[]
+  degreeType: string
+}
+
+interface FeedbackBody {
+  planId: string
+  itemId: string
+  kind: string
+  reason: string
+  dataVersion: string
+}
+
+interface ImportBody {
+  plans: PlanVO[]
+  strategy: string
+}
+
+interface LoginBody {
+  code: string
+  deviceId: string
+  nickname: string
+  avatarUrl: string
+}
+
+interface ConfirmBody {
+  confirm: string
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §3 Identity & Access
+   ══════════════════════════════════════════════════════════════ */
+
+export async function login(
+  code: string,
+  devId: string,
+  nickname: string = '',
+  avatarUrl: string = '',
+): Promise<LoginResultVO> {
+  ensureRemote()
+  const body: LoginBody = {
+    code: code,
+    deviceId: devId,
+    nickname: nickname,
+    avatarUrl: avatarUrl,
+  }
+  const r: HttpResult = await request('POST', EP_AUTH_LOGIN, JSON.stringify(body))
+  return unwrap(r) as LoginResultVO
+}
+
+export async function refreshSession(refreshTok: string): Promise<LoginResultVO> {
+  ensureRemote()
+  const r: HttpResult = await request(
+    'POST',
+    EP_AUTH_REFRESH,
+    JSON.stringify({ refreshToken: refreshTok }),
+  )
+  return unwrap(r) as LoginResultVO
+}
+
+export async function logout(): Promise<void> {
+  ensureRemote()
+  await request('POST', EP_AUTH_LOGOUT, '')
+}
+
+export async function fetchCandidateMe(): Promise<CandidateVO> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', EP_CANDIDATE_ME, '')
+  return unwrap(r) as CandidateVO
+}
+
+/** FR-10 删除我的数据。必须显式传 confirm，防误触。 */
+export async function deleteMyData(): Promise<DeleteDataVO> {
+  ensureRemote()
+  const body: ConfirmBody = { confirm: 'DELETE_ALL' }
+  const r: HttpResult = await request('DELETE', EP_CANDIDATE_DELETE_DATA, JSON.stringify(body))
+  return unwrap(r) as DeleteDataVO
+}
+
+/** FR-10 数据可携带：返回原始 JSON 文本，由页面自行落盘或复制 */
+export async function exportMyData(): Promise<string> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', EP_CANDIDATE_EXPORT, '')
+  return JSON.stringify(unwrap(r))
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §4 Meta
+   ══════════════════════════════════════════════════════════════ */
+
+export async function fetchDictionaries(): Promise<DictionaryBundleVO> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', EP_META_DICTIONARIES, '')
+  return unwrap(r) as DictionaryBundleVO
+}
+
+export async function fetchDataVersion(): Promise<DataVersionVO> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', EP_META_DATA_VERSION, '')
+  return unwrap(r) as DataVersionVO
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §5 ExamProfile（FR-01 / FR-02）
+   ══════════════════════════════════════════════════════════════ */
+
+function toExamProfileBody(form: ExamForm, declaredTotal: number): ExamProfileBody {
+  const provinces: string[] = []
+  for (let i = 0; i < form.provinces.length; i++) provinces.push(form.provinces[i])
+  const body: ExamProfileBody = {
+    provinces: provinces,
+    subjectCode: form.subjectCode,
+    subjectGroup: form.subjectGroup,
+    tier: form.tier,
+    major: form.major,
+    targetSchool: form.targetSchool,
+    isCross: form.isCross,
+    politics: form.politics,
+    foreign: form.foreign,
+    course1: form.course1,
+    course2: form.course2,
+    declaredTotal: declaredTotal,
+  }
+  return body
+}
+
+/**
+ * 表单校验（EX-01）。端上保留本地快速校验，提交前再调这里做二次校验 ——
+ * 服务端的 total 是数据库生成列算出来的，比端上更可信。
+ */
+export async function validateExamRemote(
+  form: ExamForm,
+  declaredTotal: number = 0,
+): Promise<ValidateResultVO> {
+  ensureRemote()
+  const body = toExamProfileBody(form, declaredTotal)
+  const r: HttpResult = await request('POST', EP_EXAM_VALIDATE, JSON.stringify(body))
+  return unwrap(r) as ValidateResultVO
+}
+
+/** 保存考生档案，返回服务端权威的 ExamInfo（含生成列总分与 EX-02 差异） */
+export async function saveExamProfile(
+  form: ExamForm,
+  declaredTotal: number = 0,
+): Promise<ExamInfo> {
+  ensureRemote()
+  const body = toExamProfileBody(form, declaredTotal)
+  const r: HttpResult = await request('PUT', EP_EXAM_PROFILE, JSON.stringify(body))
+  return unwrap(r) as ExamInfo
+}
+
+export async function fetchExamProfile(): Promise<ExamInfo> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', EP_EXAM_PROFILE, '')
+  return unwrap(r) as ExamInfo
+}
+
+export async function savePreference(pref: Preference): Promise<Preference> {
+  ensureRemote()
+  const body: PreferenceBody = {
+    strategies: pref.strategies,
+    regions: pref.regions,
+    directions: pref.directions,
+    careers: pref.careers,
+    degreeType: pref.degreeType,
+  }
+  const r: HttpResult = await request('PUT', EP_EXAM_PREFERENCE, JSON.stringify(body))
+  return unwrap(r) as Preference
+}
+
+export async function fetchPreference(): Promise<Preference> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', EP_EXAM_PREFERENCE, '')
+  return unwrap(r) as Preference
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §6 ProgramCatalog（FR-03）
+   ══════════════════════════════════════════════════════════════ */
+
+export async function fetchChips(): Promise<ChipListVO> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', EP_CATALOG_CHIPS, '')
+  return unwrap(r) as ChipListVO
+}
+
+/**
+ * 院校专业检索。对接 `api/index.uts` 的 `searchPrograms()`。
+ * 注意 EX-03：`noData=true` 的条目，quota / scoreLine / applyRatio 一律为空串，
+ * 页面照旧渲染「暂无数据」，不做任何估算。
+ */
+export async function fetchPrograms(
+  keyword: string = '',
+  chip: string = '全部',
+  page: number = 1,
+  size: number = 20,
+): Promise<ProgramPageVO> {
+  ensureRemote()
+  let path: string = EP_CATALOG_PROGRAMS
+  path += '?page=' + page.toString() + '&size=' + size.toString()
+  if (keyword.length > 0) path += '&keyword=' + encodeURIComponent(keyword)
+  if (chip.length > 0) path += '&chip=' + encodeURIComponent(chip)
+  const r: HttpResult = await request('GET', path, '')
+  return unwrap(r) as ProgramPageVO
+}
+
+/** 按专业代码精确检索 —— S02 科目代码回显与 S06 数据表用 */
+export async function fetchProgramsByCode(
+  majorCode: string,
+  page: number = 1,
+  size: number = 20,
+): Promise<ProgramPageVO> {
+  ensureRemote()
+  const path: string =
+    EP_CATALOG_PROGRAMS +
+    '?page=' +
+    page.toString() +
+    '&size=' +
+    size.toString() +
+    '&majorCode=' +
+    encodeURIComponent(majorCode)
+  const r: HttpResult = await request('GET', path, '')
+  return unwrap(r) as ProgramPageVO
+}
+
+/** 专业详情（S06 依据详情页数据表） */
+export async function fetchProgramDetail(programId: string): Promise<ProgramDetailVO> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', epProgramDetail(programId), '')
+  return unwrap(r) as ProgramDetailVO
+}
+
+/**
+ * 目标院校检索。对接 `api/index.uts` 的 `suggestSchools()`。
+ * **只返回院校库内已收录的院校**；召回为空 = 该院校暂无数据，页面提示 EX-03。
+ * 调用点请自行加 300ms 防抖。
+ */
+export async function fetchSchools(keyword: string = '', limit: number = 20): Promise<SchoolVO[]> {
+  ensureRemote()
+  let path: string = EP_CATALOG_SCHOOLS + '?limit=' + limit.toString()
+  if (keyword.length > 0) path += '&keyword=' + encodeURIComponent(keyword)
+  const r: HttpResult = await request('GET', path, '')
+  const vo = unwrap(r) as SchoolListVO
+  return vo.list
+}
+
+/** 精确匹配单个院校；不在库内返回 null（对应 `findSchool()`） */
+export async function findSchoolRemote(name: string): Promise<SchoolVO | null> {
+  ensureRemote()
+  if (name.length === 0) return null
+  const path: string =
+    EP_CATALOG_SCHOOLS + '?exact=true&limit=1&keyword=' + encodeURIComponent(name)
+  const r: HttpResult = await request('GET', path, '')
+  const vo = unwrap(r) as SchoolListVO
+  if (vo.list.length === 0) return null
+  return vo.list[0]
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §6 PlanGeneration（FR-04 ~ FR-07）
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * 提交生成（FR-04）。返回 taskId，由调用方轮询 `fetchGenerateTask`。
+ *
+ * 用异步任务而不是同步接口，是因为大模型排序耗时 3~30s 不可控，且 S04
+ * 「生成中」页面本身要分三段展示进度 —— 同步接口要么挂死连接，要么端上假进度。
+ *
+ * @param idemKey 幂等键（UUID）。用户连点两次生成时，服务端返回同一个 taskId
+ *                并回 40901，不是报错 —— 调用方照常进入轮询即可。
+ */
+export async function submitGenerate(
+  exam: ExamInfo,
+  pref: Preference,
+  marks: MarkRecord[],
+  planId: string,
+  idemKey: string,
+): Promise<GenerateSubmitVO> {
+  ensureRemote()
+  const body: GenerateBody = {
+    exam: exam,
+    preference: pref,
+    marks: marks,
+    planId: planId,
+  }
+  const r: HttpResult = await requestIdempotent(
+    'POST',
+    EP_PLAN_GENERATE,
+    JSON.stringify(body),
+    idemKey,
+  )
+  return unwrap(r) as GenerateSubmitVO
+}
+
+/** 查询生成进度。stageLabel / stageDetail 直接来自服务端，端上不再硬编码文案。 */
+export async function fetchGenerateTask(taskId: string): Promise<GenerateTaskVO> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', epGenerateTask(taskId), '')
+  return unwrap(r) as GenerateTaskVO
+}
+
+/**
+ * 便捷封装：提交 + 按固定节奏轮询直到出结果。
+ * 页面若需要逐步展示进度（S04），请用上面两个函数自己控节奏。
+ */
+export async function generatePlanAndWait(
+  exam: ExamInfo,
+  pref: Preference,
+  marks: MarkRecord[],
+  planId: string,
+  idemKey: string,
+): Promise<PlanVO> {
+  const submit = await submitGenerate(exam, pref, marks, planId, idemKey)
+  let last: GenerateTaskVO | null = null
+  for (let i = 0; i < POLL_MAX_TIMES; i++) {
+    await sleep(POLL_INTERVAL)
+    const task = await fetchGenerateTask(submit.taskId)
+    last = task
+    if (task.status === 'succeeded') return task.plan as PlanVO
+    if (task.status === 'failed' || task.status === 'canceled') {
+      throw new ApiError(50001, '方案生成失败，请稍后重试', 200, task.taskId)
+    }
+  }
+  // 超时不再阻断：任务仍在服务端跑，用户可在「我的方案」里看到
+  throw new ApiError(50401, '生成时间较长，可稍后在「我的方案」中查看', 200, submit.taskId)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      resolve()
+    }, ms)
+  })
+}
+
+export async function fetchPlans(page: number = 1, size: number = 20): Promise<PlanPageVO> {
+  ensureRemote()
+  const path: string =
+    EP_PLAN_LIST + '?page=' + page.toString() + '&size=' + size.toString()
+  const r: HttpResult = await request('GET', path, '')
+  return unwrap(r) as PlanPageVO
+}
+
+export async function fetchPlanDetail(planId: string): Promise<PlanVO> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', epPlanDetail(planId), '')
+  return unwrap(r) as PlanVO
+}
+
+/** 游客本地方案上云（登录时调用）。端上本地缓存**保留**作为离线兜底。 */
+export async function importPlans(
+  plans: PlanVO[],
+  strategy: string = 'skip_existing',
+): Promise<ImportResultVO> {
+  ensureRemote()
+  const body: ImportBody = { plans: plans, strategy: strategy }
+  const r: HttpResult = await request('POST', EP_PLAN_IMPORT, JSON.stringify(body))
+  return unwrap(r) as ImportResultVO
+}
+
+/** FR-06 设置标记。value ∈ ignore / prefer */
+export async function setMarkRemote(
+  planId: string,
+  programId: string,
+  value: string,
+): Promise<MarkResultVO> {
+  ensureRemote()
+  const body: MarkBody = { programId: programId, value: value }
+  const r: HttpResult = await request('PUT', epPlanMarks(planId), JSON.stringify(body))
+  return unwrap(r) as MarkResultVO
+}
+
+/** FR-06 取消标记 */
+export async function clearMarkRemote(planId: string, programId: string): Promise<MarkResultVO> {
+  ensureRemote()
+  const r: HttpResult = await request('DELETE', epPlanMark(planId, programId), '')
+  return unwrap(r) as MarkResultVO
+}
+
+/** FR-06 调整并重新生成。返回新 taskId，由调用方轮询。 */
+export async function regeneratePlan(
+  planId: string,
+  exam: ExamInfo,
+  pref: Preference,
+  marks: MarkRecord[],
+  idemKey: string,
+): Promise<GenerateSubmitVO> {
+  ensureRemote()
+  const body: GenerateBody = {
+    exam: exam,
+    preference: pref,
+    marks: marks,
+    planId: planId,
+  }
+  const r: HttpResult = await requestIdempotent(
+    'POST',
+    epPlanRegenerate(planId),
+    JSON.stringify(body),
+    idemKey,
+  )
+  return unwrap(r) as GenerateSubmitVO
+}
+
+export async function deletePlanRemote(planId: string): Promise<DeletePlanVO> {
+  ensureRemote()
+  const r: HttpResult = await request('DELETE', epPlanDetail(planId), '')
+  return unwrap(r) as DeletePlanVO
+}
+
+export async function startExport(
+  planId: string,
+  format: string = 'pdf',
+  includeDataTable: boolean = true,
+): Promise<ExportStartVO> {
+  ensureRemote()
+  const body = { format: format, includeDataTable: includeDataTable, includeDisclaimer: true }
+  const r: HttpResult = await request('POST', epPlanExport(planId), JSON.stringify(body))
+  return unwrap(r) as ExportStartVO
+}
+
+export async function fetchExportResult(
+  planId: string,
+  exportId: string,
+): Promise<ExportResultVO> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', epPlanExportResult(planId, exportId), '')
+  return unwrap(r) as ExportResultVO
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §7 Feedback（FR-09）与 Compliance（FR-08）
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * 提交反馈。`dataVersion` 必填 —— 没有它就分不清是数据问题还是模型排序问题。
+ * 网络失败时建议入本地队列择机重试，不要在反馈按钮上弹错误打断用户。
+ */
+export async function submitFeedbackRemote(
+  planId: string,
+  itemId: string,
+  kind: string,
+  reason: string,
+  dataVersion: string,
+): Promise<FeedbackCreatedVO> {
+  ensureRemote()
+  const body: FeedbackBody = {
+    planId: planId,
+    itemId: itemId,
+    kind: kind,
+    reason: reason,
+    dataVersion: dataVersion,
+  }
+  const r: HttpResult = await request('POST', EP_FEEDBACK, JSON.stringify(body))
+  return unwrap(r) as FeedbackCreatedVO
+}
+
+export async function fetchDisclaimer(): Promise<DisclaimerVO> {
+  ensureRemote()
+  const r: HttpResult = await request('GET', EP_DISCLAIMER, '')
+  return unwrap(r) as DisclaimerVO
+}
+
+/** 勾选留痕。服务端每次追加一行，不更新 —— 这是合规审计证据。 */
+export async function acceptDisclaimer(version: string, devId: string): Promise<boolean> {
+  ensureRemote()
+  const body = { version: version, deviceId: devId }
+  const r: HttpResult = await request('POST', EP_DISCLAIMER_ACCEPT, JSON.stringify(body))
+  return r.ok
+}

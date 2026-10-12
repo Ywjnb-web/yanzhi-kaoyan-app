@@ -1,0 +1,67 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <!-- 系统状态栏占位：navigationStyle 为 custom，高度取系统实测值 -->
+    <view :style="statusStyle" />
+    <view class="w-full flex flex-row items-center justify-between px-5 h-[44px]">
+      <view class="flex flex-row items-center" @click="onLead">
+        <view v-if="lead !== 'none'" class="flex flex-row items-center justify-center w-5 h-5">
+          <c-icon :name="leadIcon" :size="18" />
+        </view>
+        <text
+          class="font-semibold text-ink text-title"
+          :class="lead !== 'none' ? 'ml-2' : ''"
+          >{{ leadText }}</text
+        >
+      </view>
+      <text v-if="right.length > 0" class="text-cap text-ink3">{{ right }}</text>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 顶部导航栏（含状态栏占位）
+ *
+ * 三种形态：
+ *   lead = 'back'  → 返回图标 + 页面标题
+ *   lead = 'close' → 关闭图标 + 页面标题
+ *   lead = 'none'  → 仅页面标题
+ */
+import { computed } from 'vue'
+
+const props = defineProps<{
+  /** 页面标题；为空时左组只显示 leadText */
+  title?: string
+  /** back / close / none */
+  lead?: string
+  /** lead 为 none 时忽略；标题为空时展示在图标旁 */
+  leadText?: string
+  /** 右侧次要信息，如「数据版本 2026-10」 */
+  right?: string
+}>()
+
+const emit = defineEmits(['lead'])
+
+const lead = computed<string>((): string => (props.lead != null ? props.lead : 'back'))
+const title = computed<string>((): string => (props.title != null ? props.title : ''))
+const right = computed<string>((): string => (props.right != null ? props.right : ''))
+
+const leadText = computed<string>((): string => {
+  if (title.value.length > 0) return title.value
+  if (props.leadText != null && props.leadText.length > 0) return props.leadText
+  return lead.value === 'close' ? '关闭' : '返回'
+})
+
+const leadIcon = computed<string>((): string => (lead.value === 'close' ? 'close' : 'back'))
+
+const statusStyle = computed<string>((): string => {
+  const info = uni.getSystemInfoSync()
+  const h: number = info.statusBarHeight != null ? info.statusBarHeight : 20
+  return 'height:' + h.toString() + 'px'
+})
+
+function onLead() {
+  if (lead.value === 'none') return
+  emit('lead')
+}
+</script>

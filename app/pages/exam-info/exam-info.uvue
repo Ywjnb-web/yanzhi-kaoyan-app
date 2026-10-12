@@ -1,0 +1,755 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-nav-bar lead="back" title="考生信息" @lead="back" />
+
+    <view class="w-full flex flex-col px-5 pb-10">
+      <!-- 步骤指示 -->
+      <view class="w-full flex flex-col pt-3">
+        <text class="w-full text-note font-medium text-ink2">第 1 步 / 共 3 步 · 考生信息</text>
+        <view class="w-full mt-2">
+          <c-progress :percent="33" :height="4" />
+        </view>
+      </view>
+
+      <text class="w-full text-h2 font-bold text-ink mt-5">填写考生信息</text>
+      <text class="w-full text-body text-ink2 mt-2"
+        >先选 A / B 区，再勾选意向省份（可多选）；科目代码用于锁定你的报考专业方向</text
+      >
+
+      <!-- 报考与背景 -->
+      <text class="w-full text-lead font-semibold text-ink mt-6">报考与背景</text>
+
+      <view class="w-full flex flex-col mt-3">
+        <!-- 意向省份：先 A / B 区，再滚动列表勾选 -->
+        <view class="w-full" @click="openPicker('province')">
+          <c-cell
+            label="意向省份"
+            :value="provinceText"
+            :placeholder="form.provinces.length === 0"
+            :chevron="true"
+          />
+        </view>
+        <view v-if="form.provinces.length > 0" class="w-full flex flex-row flex-wrap mt-2">
+          <view v-for="p in pickedPreview" :key="'pg-' + p" class="mr-2 mb-2">
+            <c-chip :label="p" size="sm" :selected="true" @press="openPicker('province')" />
+          </view>
+          <view v-if="moreCount > 0" class="mr-2 mb-2">
+            <c-chip :label="'还有 ' + moreCount + ' 个'" size="sm" />
+          </view>
+        </view>
+
+        <!-- 报考科目代码 -->
+        <view class="w-full flex flex-col mt-2.5">
+          <view
+            class="w-full flex flex-row items-center justify-between px-3.5 h-[46px] rounded-cell border border-solid bg-white"
+            :class="subjectCodeError ? 'border-brand' : 'border-line'"
+          >
+            <text class="text-body text-ink2">报考科目代码</text>
+            <input
+              class="tnum text-right text-sub font-semibold text-ink"
+              style="width: 130px"
+              type="number"
+              :maxlength="6"
+              v-model="form.subjectCode"
+              placeholder="如 085401"
+              placeholder-style="color:#A6ABB3;font-weight:400"
+            />
+          </view>
+          <view class="w-full flex flex-row flex-wrap items-center mt-2">
+            <text class="text-cap text-ink3 mr-2 mb-2">常用</text>
+            <view v-for="c in quickCodes" :key="'qc-' + c" class="mr-2 mb-2">
+              <c-chip :label="c" size="sm" :selected="form.subjectCode === c" @press="applyCode(c)" />
+            </view>
+          </view>
+          <text class="w-full text-cap" :class="subjectCodeError ? 'text-brand' : 'text-ink3'">{{
+            codeHint
+          }}</text>
+        </view>
+
+        <!-- 初试科目组合 -->
+        <view class="w-full mt-2.5" @click="pickSubject">
+          <c-cell
+            label="初试科目组合"
+            :value="subjectText"
+            :placeholder="form.subjectGroup.length === 0"
+            :chevron="true"
+          />
+        </view>
+
+        <!-- 本科院校层次 -->
+        <view class="w-full mt-2.5" @click="pickTier">
+          <c-cell
+            label="本科院校层次"
+            :value="tierText"
+            :placeholder="form.tier.length === 0"
+            :chevron="true"
+          />
+        </view>
+
+        <!-- 本科专业（可手动输入） -->
+        <view class="w-full mt-2.5" @click="openPicker('major')">
+          <c-cell
+            label="本科专业"
+            :value="majorText"
+            :placeholder="form.major.length === 0"
+            :chevron="true"
+          />
+        </view>
+
+        <!-- 目标院校（选填，关键词检索或自由输入） -->
+        <view class="w-full mt-2.5" @click="openPicker('school')">
+          <c-cell
+            label="目标院校（选填）"
+            :value="schoolText"
+            :placeholder="form.targetSchool.length === 0"
+            :chevron="true"
+          />
+        </view>
+        <view v-if="schoolHintText.length > 0" class="w-full px-3.5 py-2.5 rounded-cell bg-fill mt-1.5">
+          <text class="w-full text-cap text-ink2">{{ schoolHintText }}</text>
+        </view>
+
+        <!-- 是否跨考 -->
+        <view class="w-full flex flex-row items-center mt-3">
+          <text class="text-body text-ink2">是否跨考</text>
+          <view class="ml-2.5">
+            <c-chip label="否" :selected="!form.isCross" @press="form.isCross = false" />
+          </view>
+          <view class="ml-2.5">
+            <c-chip label="是" :selected="form.isCross" @press="form.isCross = true" />
+          </view>
+        </view>
+      </view>
+
+      <!-- 初试成绩 -->
+      <text class="w-full text-lead font-semibold text-ink mt-6">初试成绩</text>
+
+      <view class="w-full flex flex-col mt-3">
+        <view
+          class="w-full flex flex-row items-center justify-between px-3.5 h-[46px] rounded-cell border border-solid bg-white"
+          :class="errorKeys.indexOf('politics') >= 0 ? 'border-brand' : 'border-line'"
+        >
+          <text class="text-body text-ink2">{{ labelPolitics }}</text>
+          <input
+            class="text-right text-sub font-semibold text-ink"
+            style="width: 110px"
+            type="number"
+            v-model="form.politics"
+            placeholder="未填写"
+            placeholder-style="color:#A6ABB3;font-weight:400"
+          />
+        </view>
+
+        <view
+          class="w-full flex flex-row items-center justify-between px-3.5 h-[46px] rounded-cell border border-solid bg-white mt-2.5"
+          :class="errorKeys.indexOf('foreign') >= 0 ? 'border-brand' : 'border-line'"
+        >
+          <text class="text-body text-ink2">{{ labelForeign }}</text>
+          <input
+            class="text-right text-sub font-semibold text-ink"
+            style="width: 110px"
+            type="number"
+            v-model="form.foreign"
+            placeholder="未填写"
+            placeholder-style="color:#A6ABB3;font-weight:400"
+          />
+        </view>
+
+        <view
+          class="w-full flex flex-row items-center justify-between px-3.5 h-[46px] rounded-cell border border-solid bg-white mt-2.5"
+          :class="errorKeys.indexOf('course1') >= 0 ? 'border-brand' : 'border-line'"
+        >
+          <text class="text-body text-ink2">{{ labelCourse1 }}</text>
+          <input
+            class="text-right text-sub font-semibold text-ink"
+            style="width: 110px"
+            type="number"
+            v-model="form.course1"
+            placeholder="未填写"
+            placeholder-style="color:#A6ABB3;font-weight:400"
+          />
+        </view>
+
+        <view
+          class="w-full flex flex-row items-center justify-between px-3.5 h-[46px] rounded-cell border border-solid bg-white mt-2.5"
+          :class="errorKeys.indexOf('course2') >= 0 ? 'border-brand' : 'border-line'"
+        >
+          <text class="text-body text-ink2">{{ labelCourse2 }}</text>
+          <input
+            class="text-right text-sub font-semibold text-ink"
+            style="width: 110px"
+            type="number"
+            v-model="form.course2"
+            placeholder="未填写"
+            placeholder-style="color:#A6ABB3;font-weight:400"
+          />
+        </view>
+      </view>
+
+      <!-- 总分（自动计算） -->
+      <view class="w-full flex flex-row items-center justify-between px-3.5 h-[52px] rounded-btn bg-fill mt-3">
+        <text class="text-body text-ink2">总分（各科之和，自动计算）</text>
+        <text class="tnum text-h3 font-bold text-ink">{{ totalText }}</text>
+      </view>
+
+      <!-- EX-02：与本地草稿记录的总分不一致 -->
+      <view v-if="draftDelta !== 0" class="w-full flex flex-col px-3.5 py-3 rounded-btn bg-brandsoft mt-2.5">
+        <text class="w-full text-note font-medium text-ink">{{ ex02Text }}</text>
+        <text class="w-full text-cap text-ink2 mt-1"
+          >已保留你此前填写的内容，修正后即可继续（EX-02）。</text
+        >
+      </view>
+
+      <!-- EX-01：必填缺失 -->
+      <view v-if="errors.length > 0" class="w-full flex flex-col px-3.5 py-3 rounded-btn bg-fill mt-2.5">
+        <text class="w-full text-note font-medium text-ink">还有 {{ errors.length }} 项需要处理</text>
+        <text v-for="(e, i) in errors" :key="e" class="w-full text-cap text-ink2" :class="i === 0 ? 'mt-1.5' : 'mt-1'"
+          >· {{ e }}</text
+        >
+      </view>
+
+      <view class="w-full mt-5">
+        <c-btn label="下一步：填写兴趣偏好" variant="primary" size="lg" @press="submit" />
+      </view>
+    </view>
+
+    <!-- ══════════════════════════════════════════════════════════
+         底部选择面板 —— 意向省份 / 本科专业 / 目标院校 共用同一个浮层
+         遮罩与面板是兄弟节点，靠 z-index 分层，不依赖事件冒泡拦截
+         ══════════════════════════════════════════════════════════ -->
+    <view v-if="pickerKind.length > 0" class="picker-root w-full flex flex-col justify-end">
+      <view class="picker-mask" @click="closePicker" />
+
+      <view class="picker-panel w-full flex flex-col bg-white">
+        <!-- 标题 -->
+        <view class="w-full flex flex-row items-center justify-between px-5 pt-4">
+          <text class="text-h3 font-bold text-ink">{{ pickerTitle }}</text>
+          <view class="w-[32px] h-[32px] flex flex-row items-center justify-center" @click="closePicker">
+            <c-icon name="close" :size="18" />
+          </view>
+        </view>
+
+        <!-- ① 意向省份：先 A / B 区，再滚动列表勾选（可跨区累计） -->
+        <view v-if="pickerKind === 'province'" class="w-full flex flex-col px-5">
+          <view class="w-full flex flex-row items-center mt-1">
+            <view class="mr-2.5">
+              <c-chip label="A 区" size="sm" :selected="pickRegion === 'A 区'" @press="setRegion('A 区')" />
+            </view>
+            <view class="mr-2.5">
+              <c-chip label="B 区" size="sm" :selected="pickRegion === 'B 区'" @press="setRegion('B 区')" />
+            </view>
+            <text class="flex-1 text-cap text-ink3 text-right">{{ regionBrief }}</text>
+          </view>
+
+          <scroll-view class="w-full mt-3" style="height: 280px" :scroll-y="true">
+            <view
+              v-for="p in activeProvinces"
+              :key="p"
+              class="w-full flex flex-row items-center justify-between px-3.5 h-[46px] rounded-cell border border-solid mb-2"
+              :class="hasProvince(p) ? 'border-brand bg-brandsoft' : 'border-line bg-white'"
+              @click="toggleProvince(p)"
+            >
+              <text class="text-body font-medium text-ink">{{ p }}</text>
+              <c-icon v-if="hasProvince(p)" name="tick" :size="16" />
+            </view>
+          </scroll-view>
+
+          <text class="w-full text-cap text-ink3 mt-1"
+            >已选 {{ form.provinces.length }} 个 · 切换 A / B 区可继续添加，已选不会丢失</text
+          >
+
+          <view v-if="form.provinces.length > 0" class="w-full flex flex-row flex-wrap mt-2">
+            <view v-for="p in pickedPreview" :key="'sel-' + p" class="mr-2 mb-2">
+              <c-chip :label="p" size="sm" :selected="true" @press="toggleProvince(p)" />
+            </view>
+            <view v-if="moreCount > 0" class="mr-2 mb-2">
+              <c-chip :label="'还有 ' + moreCount + ' 个'" size="sm" />
+            </view>
+          </view>
+
+          <view class="w-full mt-3">
+            <c-btn label="完成" variant="primary" size="md" @press="closePicker" />
+          </view>
+        </view>
+
+        <!-- ② 本科专业：可自由输入，也可从常用项点选 -->
+        <view v-else-if="pickerKind === 'major'" class="w-full flex flex-col px-5">
+          <view
+            class="w-full flex flex-row items-center px-3.5 h-[46px] rounded-cell border border-solid border-line bg-white mt-1"
+          >
+            <input
+              class="flex-1 text-sub text-ink"
+              type="text"
+              v-model="draftText"
+              placeholder="直接输入本科专业名称"
+              placeholder-style="color:#A6ABB3"
+            />
+          </view>
+          <text class="w-full text-cap text-ink3 mt-2">支持手动输入；也可从下方常用专业中点选。</text>
+
+          <scroll-view class="w-full mt-2" style="height: 260px" :scroll-y="true">
+            <view
+              v-for="m in majorOptions"
+              :key="m"
+              class="w-full flex flex-row items-center justify-between px-3.5 h-[46px] rounded-cell border border-solid mb-2"
+              :class="draftText === m ? 'border-brand bg-brandsoft' : 'border-line bg-white'"
+              @click="draftText = m"
+            >
+              <text class="text-body text-ink">{{ m }}</text>
+              <c-icon v-if="draftText === m" name="tick" :size="16" />
+            </view>
+          </scroll-view>
+
+          <view class="w-full mt-3">
+            <c-btn label="确定" variant="primary" size="md" @press="confirmMajor" />
+          </view>
+        </view>
+
+        <!-- ③ 目标院校：关键词检索库内院校 + 自由输入 -->
+        <view v-else class="w-full flex flex-col px-5">
+          <view
+            class="w-full flex flex-row items-center px-3.5 h-[46px] rounded-cell border border-solid border-line bg-white mt-1"
+          >
+            <view class="mr-2 flex flex-row items-center">
+              <c-icon name="searchMuted" :size="16" />
+            </view>
+            <input
+              class="flex-1 text-sub text-ink"
+              type="text"
+              v-model="draftText"
+              placeholder="输入院校名称关键词"
+              placeholder-style="color:#A6ABB3"
+            />
+          </view>
+
+          <text class="w-full text-cap text-ink3 mt-2"
+            >仅列出院校库内已收录的院校；库内没有的院校可以照常填写，方案不会编造它的数字（EX-03）。</text
+          >
+
+          <scroll-view class="w-full mt-2" style="height: 240px" :scroll-y="true">
+            <view
+              v-for="s in schoolHits"
+              :key="s.university"
+              class="w-full flex flex-col px-3.5 py-2.5 rounded-cell border border-solid mb-2"
+              :class="draftText === s.university ? 'border-brand bg-brandsoft' : 'border-line bg-white'"
+              @click="draftText = s.university"
+            >
+              <view class="w-full flex flex-row items-center justify-between">
+                <text class="flex-1 text-body font-medium text-ink">{{ s.university }}</text>
+                <text class="text-cap text-ink3">{{ s.level }}</text>
+              </view>
+              <text class="w-full text-cap text-ink3 mt-1">{{ s.province }} · {{ s.region }}</text>
+            </view>
+
+            <view v-if="schoolHits.length === 0" class="w-full flex flex-col px-3.5 py-3 rounded-cell bg-fill">
+              <text class="w-full text-note font-medium text-ink">院校库内暂无匹配结果</text>
+              <text class="w-full text-cap text-ink2 mt-1"
+                >你仍可直接使用「{{ draftText }}」；该院校不会被估算任何数字（EX-03）。</text
+              >
+            </view>
+          </scroll-view>
+
+          <view class="w-full mt-3">
+            <c-btn :label="schoolUseLabel" variant="primary" size="md" @press="confirmSchool" />
+          </view>
+          <text class="w-full text-cap text-ink3 text-center mt-2" @click="clearSchool">清除目标院校</text>
+        </view>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S02 考生信息采集　（FR-01）
+ *
+ * 四个刻意的实现选择：
+ *  1. 总分不可手填，恒等于各科之和 —— 从源头消灭「人工算错总分」这一类问题；
+ *  2. EX-02 挂在「本地草稿」上：弱网中断后回来改了某一科，旧总分与新之和不一致，
+ *     此时给出差额提示，而不是静默覆盖（EX-08 → EX-02 的连锁场景）；
+ *  3. 意向省份改成「先 A / B 区 → 滚动列表多选」，不再走系统 ActionSheet：
+ *     showActionSheet 的 itemList 有 6 项硬上限，撑不起「自由添加意向省份」，
+ *     而且它无法表达选中态。切换区域不会清空已选，可跨区累计；
+ *  4. 本科专业与目标院校都支持**自由输入**。目标院校若不在院校库内，
+ *     如实提示「库内暂无数据」，但允许照常填写 —— 对应 EX-03，绝不臆造数字。
+ */
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { ExamForm } from '../../types/models.uts'
+import {
+  EXAM_REGIONS,
+  SUBJECT_GROUPS,
+  TIER_OPTIONS,
+  MAJOR_OPTIONS,
+  QUICK_SUBJECT_CODES,
+  provincesOfRegion,
+  subjectCodeNameOf,
+  regionLabelOfProvinces,
+} from '../../constants/dictionary.uts'
+import {
+  toScore,
+  isSixDigits,
+  validateExam,
+  composeExam,
+  crossCheckTotal,
+  saveExamDraft,
+  loadExamDraft,
+  loadDraftTotal,
+  suggestSchools,
+  findSchool,
+} from '../../api/index.uts'
+import type { SchoolOption } from '../../api/index.uts'
+import { examInfo } from '../../store/app.uts'
+import { goBack } from '../../utils/nav.uts'
+
+const form = ref<ExamForm>({
+  provinces: [],
+  subjectCode: '',
+  subjectGroup: '',
+  tier: '',
+  major: '',
+  targetSchool: '',
+  isCross: false,
+  politics: '',
+  foreign: '',
+  course1: '',
+  course2: '',
+})
+
+const errors = ref<string[]>([])
+const errorKeys = ref<string[]>([])
+/** EX-02：草稿记录的总分与当前各科之和的差额 */
+const draftDelta = ref<number>(0)
+
+/* ── 选择面板状态 ─────────────────────────────────────── */
+
+/** '' | 'province' | 'major' | 'school' */
+const pickerKind = ref<string>('')
+/** 省份面板当前浏览的区域 —— 只是列表筛选器，不参与提交 */
+const pickRegion = ref<string>('A 区')
+/** 面板内输入框的内容（专业 / 院校），确认后才写回 form */
+const draftText = ref<string>('')
+
+/* ── 展示文案 ─────────────────────────────────────────── */
+
+const regionLabel = computed<string>((): string => regionLabelOfProvinces(form.value.provinces))
+
+const provinceText = computed<string>((): string => {
+  const n = form.value.provinces.length
+  if (n === 0) return '请选择'
+  const region = regionLabel.value
+  return (region.length > 0 ? region + ' · ' : '') + n.toString() + ' 个意向省份'
+})
+
+/** 已选省份最多平铺 8 个，其余折叠成「还有 N 个」—— 避免换行把浮层顶出屏幕 */
+const PICKED_PREVIEW_MAX = 8
+
+const pickedPreview = computed<string[]>((): string[] => {
+  const list = form.value.provinces
+  const out: string[] = []
+  const limit = list.length > PICKED_PREVIEW_MAX ? PICKED_PREVIEW_MAX : list.length
+  for (let i = 0; i < limit; i++) out.push(list[i])
+  return out
+})
+
+const moreCount = computed<number>((): number => {
+  const n = form.value.provinces.length - PICKED_PREVIEW_MAX
+  return n > 0 ? n : 0
+})
+
+const activeProvinces = computed<string[]>((): string[] => provincesOfRegion(pickRegion.value))
+
+const majorOptions = computed<string[]>((): string[] => MAJOR_OPTIONS)
+
+const quickCodes = computed<string[]>((): string[] => QUICK_SUBJECT_CODES)
+
+/** 院校候选随输入即时收敛；空输入时列出库内全部院校 */
+const schoolHits = computed<SchoolOption[]>((): SchoolOption[] => suggestSchools(draftText.value))
+
+const regionBrief = computed<string>((): string => {
+  return pickRegion.value + ' · ' + activeProvinces.value.length.toString() + ' 个省级行政区'
+})
+
+const subjectCodeInvalid = computed<boolean>((): boolean => {
+  const c = form.value.subjectCode
+  return c.length > 0 && !isSixDigits(c)
+})
+
+const subjectCodeError = computed<boolean>((): boolean => {
+  if (subjectCodeInvalid.value) return true
+  return errorKeys.value.indexOf('subjectCode') >= 0
+})
+
+const codeHint = computed<string>((): string => {
+  const c = form.value.subjectCode
+  if (c.length === 0) return '6 位专业代码，如 085401（新一代电子信息技术）'
+  const name = subjectCodeNameOf(c)
+  if (name.length > 0) return c + ' · ' + name
+  if (isSixDigits(c)) return '院校库未收录该代码，将按你填写的组合参与匹配。'
+  return '代码应为 6 位数字，如 085401。'
+})
+
+const schoolText = computed<string>((): string => {
+  const t = form.value.targetSchool
+  return t.length > 0 ? t : '请选择'
+})
+
+/** EX-03：库内命中 / 库内无数据，两种结果如实分说 */
+const schoolHintText = computed<string>((): string => {
+  const t = form.value.targetSchool
+  if (t.length === 0) return ''
+  const s = findSchool(t)
+  if (s != null) {
+    return '已匹配院校库：' + s.university + ' · ' + s.province + ' · ' + s.region + ' · ' + s.level
+  }
+  return '院校库内暂无「' + t + '」的数据，方案将按你的分数区间推荐，不会编造该校的任何数字（EX-03）。'
+})
+
+const schoolUseLabel = computed<string>((): string => {
+  const t = draftText.value
+  if (t.length === 0) return '不使用目标院校，跳过'
+  if (t.length > 8) return '使用「' + t.substring(0, 8) + '…」'
+  return '使用「' + t + '」'
+})
+
+const pickerTitle = computed<string>((): string => {
+  if (pickerKind.value === 'province') return '选择意向省份'
+  if (pickerKind.value === 'major') return '填写本科专业'
+  if (pickerKind.value === 'school') return '查找目标院校'
+  return ''
+})
+
+const subjectText = computed<string>((): string => {
+  return form.value.subjectGroup.length > 0 ? form.value.subjectGroup : '请选择'
+})
+
+const tierText = computed<string>((): string => {
+  return form.value.tier.length > 0 ? form.value.tier : '请选择'
+})
+
+const majorText = computed<string>((): string => {
+  return form.value.major.length > 0 ? form.value.major : '请选择'
+})
+
+function fullMarks(): number[] {
+  for (let i = 0; i < SUBJECT_GROUPS.length; i++) {
+    if (SUBJECT_GROUPS[i].label === form.value.subjectGroup) {
+      return [100, 100, 150, 150]
+    }
+  }
+  return [100, 100, 150, 150]
+}
+
+function namesOfGroup(): string[] {
+  for (let i = 0; i < SUBJECT_GROUPS.length; i++) {
+    if (SUBJECT_GROUPS[i].label === form.value.subjectGroup) {
+      return [SUBJECT_GROUPS[i].course1Name, SUBJECT_GROUPS[i].course2Name]
+    }
+  }
+  return ['业务课一', '业务课二']
+}
+
+const scoreFields = computed<string[]>((): string[] => {
+  const full = fullMarks()
+  const names = namesOfGroup()
+  return [
+    '政治（满分 ' + full[0].toString() + '）',
+    '外国语（满分 ' + full[1].toString() + '）',
+    '业务课一 · ' + names[0] + '（满分 ' + full[2].toString() + '）',
+    '业务课二 · ' + names[1] + '（满分 ' + full[3].toString() + '）',
+  ]
+})
+
+const labelPolitics = computed<string>((): string => scoreFields.value[0])
+const labelForeign = computed<string>((): string => scoreFields.value[1])
+const labelCourse1 = computed<string>((): string => scoreFields.value[2])
+const labelCourse2 = computed<string>((): string => scoreFields.value[3])
+
+const total = computed<number>((): number => {
+  const f = form.value
+  return (
+    Math.max(toScore(f.politics), 0) +
+    Math.max(toScore(f.foreign), 0) +
+    Math.max(toScore(f.course1), 0) +
+    Math.max(toScore(f.course2), 0)
+  )
+})
+
+const totalText = computed<string>((): string => total.value.toString() + ' / 500')
+
+const ex02Text = computed<string>((): string => {
+  const d = draftDelta.value
+  if (d > 0) {
+    return '各科之和比上次保存的总分少 ' + Math.abs(d).toString() + ' 分，请确认成绩是否填错。'
+  }
+  return '各科之和比上次保存的总分多 ' + Math.abs(d).toString() + ' 分，请确认成绩是否填错。'
+})
+
+/* ── 交互 ─────────────────────────────────────────────── */
+
+/**
+ * 返回上一步。本页可能从首页进入，也可能从「我的方案」进入，
+ * 正常走 navigateBack；若栈里只有本页（编译模式直达），回落到首页。
+ */
+function back() {
+  goBack('/pages/index/index')
+}
+
+/** 通用 ActionSheet 选择（仅用于选项数 ≤ 6 的短列表） */
+function pickFrom(title: string, options: string[], onPicked: (v: string) => void) {
+  uni.showActionSheet({
+    itemList: options,
+    success: (res) => {
+      onPicked(options[res.tapIndex])
+    },
+  })
+}
+
+function pickSubject() {
+  const labels: string[] = []
+  for (let i = 0; i < SUBJECT_GROUPS.length; i++) labels.push(SUBJECT_GROUPS[i].label)
+  pickFrom('初试科目组合', labels, (v: string) => {
+    form.value.subjectGroup = v
+  })
+}
+
+function pickTier() {
+  pickFrom('本科院校层次', TIER_OPTIONS, (v: string) => {
+    form.value.tier = v
+  })
+}
+
+/* ── 底部选择面板 ─────────────────────────────────────── */
+
+function openPicker(kind: string) {
+  pickerKind.value = kind
+  if (kind === 'major') {
+    draftText.value = form.value.major
+  } else if (kind === 'school') {
+    draftText.value = form.value.targetSchool
+  } else {
+    draftText.value = ''
+  }
+  // 打开省份面板时，把列表定位到已选省份所在的区域
+  if (kind === 'province' && form.value.provinces.length > 0) {
+    const first = form.value.provinces[0]
+    for (let i = 0; i < EXAM_REGIONS.length; i++) {
+      const list = provincesOfRegion(EXAM_REGIONS[i])
+      let hit = false
+      for (let j = 0; j < list.length; j++) {
+        if (list[j] === first) hit = true
+      }
+      if (hit) {
+        pickRegion.value = EXAM_REGIONS[i]
+        break
+      }
+    }
+  }
+}
+
+function closePicker() {
+  pickerKind.value = ''
+}
+
+function setRegion(r: string) {
+  pickRegion.value = r
+}
+
+function hasProvince(p: string): boolean {
+  const list = form.value.provinces
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === p) return true
+  }
+  return false
+}
+
+/** 点选即切换选中态；再点一次取消。可跨 A / B 区累计 */
+function toggleProvince(p: string) {
+  const list = form.value.provinces
+  const next: string[] = []
+  let removed = false
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === p) {
+      removed = true
+      continue
+    }
+    next.push(list[i])
+  }
+  if (!removed) next.push(p)
+  form.value.provinces = next
+}
+
+function applyCode(code: string) {
+  form.value.subjectCode = code
+}
+
+function confirmMajor() {
+  const t = draftText.value
+  if (t.length === 0) {
+    uni.showToast({ title: '请先输入或选择一个专业', icon: 'none' })
+    return
+  }
+  form.value.major = t
+  closePicker()
+}
+
+function confirmSchool() {
+  form.value.targetSchool = draftText.value
+  closePicker()
+}
+
+function clearSchool() {
+  draftText.value = ''
+  form.value.targetSchool = ''
+  closePicker()
+}
+
+/* ── 提交 ─────────────────────────────────────────────── */
+
+function submit() {
+  const list = validateExam(form.value)
+  errors.value = list
+  // 把「哪个字段错了」映射出来，用于行内高亮
+  const keys: string[] = []
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i]
+    if (e.indexOf('意向省份') >= 0) keys.push('provinces')
+    if (e.indexOf('科目代码') >= 0) keys.push('subjectCode')
+    if (e.indexOf('科目组合') >= 0) keys.push('subjectGroup')
+    if (e.indexOf('院校层次') >= 0) keys.push('tier')
+    if (e.indexOf('本科专业') >= 0) keys.push('major')
+    if (e.indexOf('政治') >= 0) keys.push('politics')
+    if (e.indexOf('外国语') >= 0) keys.push('foreign')
+    if (e.indexOf('业务课一') >= 0) keys.push('course1')
+    if (e.indexOf('业务课二') >= 0) keys.push('course2')
+  }
+  errorKeys.value = keys
+
+  if (list.length > 0) {
+    uni.showToast({ title: list[0], icon: 'none' })
+    return
+  }
+
+  examInfo.value = composeExam(form.value)
+  saveExamDraft(form.value, total.value)
+  draftDelta.value = 0
+  uni.navigateTo({ url: '/pages/preference/preference' })
+}
+
+/* ── 生命周期 ─────────────────────────────────────────── */
+
+onLoad(() => {
+  // EX-08：弱网/退出后回来，恢复本地草稿（loadExamDraft 会做一次结构升级）
+  const draft = loadExamDraft()
+  if (draft != null) {
+    form.value = draft
+  }
+  const declared = loadDraftTotal()
+  if (declared > 0) {
+    const delta = crossCheckTotal(declared, total.value)
+    if (delta !== 0) {
+      draftDelta.value = delta
+    }
+  }
+})
+</script>

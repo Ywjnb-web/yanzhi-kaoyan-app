@@ -1,0 +1,290 @@
+/**
+ * 统一请求封装
+ *
+ * 职责（只做这四件事，含业务判断的一律不做）：
+ *   1. 拼 URL、注入 `Authorization` / `X-Device-Id` / `Idempotency-Key`
+ *   2. 解包统一响应体 `{ code, message, traceId, data }`
+ *   3. 把 HTTP 状态码与业务 code 翻译成一句用户看得懂的话
+ *   4. 40102（access 过期）自动刷新令牌并**重试一次**，失败则回落游客态
+ *
+ * ── 为什么 data 用宽松类型 ──
+ * 本项目只编译到 mp-weixin（UTS → JS），JSON.parse 的结果可以宽松转型，
+ * 与 `api/index.uts` 里既有的 `JSON.parse(text) as PlanVO[]` 保持同一套做法。
+ * 若将来要编译到 App / 鸿蒙端，UTS 是强类型的，需要为每个响应体单独定义信封
+ * 接口（如 `interface PlanEnvelope { code: number; message: string; data: PlanVO }`），
+ * 届时只需替换本文件与 remote.uts 的解析处，页面不受影响。
+ */
+import {
+  BASE_URL,
+  TIMEOUT,
+  deviceId,
+  accessToken,
+  refreshToken,
+  saveTokens,
+  clearTokens,
+} from './config.uts'
+
+/* ══════════════════════════════════════════════════════════════
+   响应结构
+   ══════════════════════════════════════════════════════════════ */
+
+/** 后端统一响应包 */
+export interface ApiEnvelope {
+  code: number
+  message: string
+  traceId: string
+  data: any
+}
+
+/** 封装后的请求结果 —— 页面与 remote 层只认这个 */
+export interface HttpResult {
+  /** HTTP 2xx 且业务 code === 0 */
+  ok: boolean
+  /** HTTP 状态码 */
+  status: number
+  /** 业务码。0 成功；网络失败为 -1 */
+  code: number
+  /** 可直接展示给用户的文案（中文，已翻译） */
+  message: string
+  traceId: string
+  data: any
+}
+
+/** 校验类接口返回的字段级错误 */
+export interface FieldError {
+  field: string
+  code: string
+  message: string
+}
+
+/* ══════════════════════════════════════════════════════════════
+   错误
+   ══════════════════════════════════════════════════════════════ */
+
+export class ApiError {
+  name: string = 'ApiError'
+  code: number
+  status: number
+  message: string
+  traceId: string
+  /** 字段级错误（仅 40001 时非空） */
+  fields: FieldError[]
+
+  constructor(code: number, message: string, status: number, traceId: string) {
+    this.code = code
+    this.status = status
+    this.message = message
+    this.traceId = traceId
+    this.fields = []
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   错误码 → 用户文案（与契约 §2.4 一一对应）
+   ══════════════════════════════════════════════════════════════ */
+
+interface CodeText {
+  code: number
+  text: string
+}
+
+const CODE_TEXTS: CodeText[] = [
+  { code: -1, text: '网络连接失败，请检查网络后重试' },
+  { code: 40001, text: '填写的信息有误，请检查后重试' },
+  { code: 40002, text: '请求格式异常，请稍后重试' },
+  { code: 40101, text: '登录状态已失效，请重新登录' },
+  { code: 40102, text: '登录状态已过期，正在为你恢复' },
+  { code: 40103, text: '登录已过期，你仍可以游客身份继续使用' },
+  { code: 40301, text: '你没有权限访问该内容' },
+  { code: 40401, text: '内容不存在或已被删除' },
+  { code: 40901, text: '相同的操作正在处理中，请稍候' },
+  { code: 42201, text: '成绩超出该科目满分，请检查' },
+  { code: 42202, text: '报考科目代码应为 6 位数字，如 085401' },
+  { code: 42203, text: '请先选择意向省份' },
+  { code: 42901, text: '操作太频繁了，请稍后再试' },
+  { code: 50001, text: '服务开小差了，请稍后重试' },
+  { code: 50301, text: '院校数据源正在维护，请稍后重试' },
+  { code: 50302, text: '智能排序暂不可用，已为你生成基础方案' },
+  { code: 50401, text: '生成时间较长，可稍后在「我的方案」中查看' },
+]
+
+function textOfCode(code: number): string {
+  for (let i = 0; i < CODE_TEXTS.length; i++) {
+    if (CODE_TEXTS[i].code === code) return CODE_TEXTS[i].text
+  }
+  return '操作失败，请稍后重试'
+}
+
+/* ══════════════════════════════════════════════════════════════
+   请求
+   ══════════════════════════════════════════════════════════════ */
+
+/** payload 传已序列化的 JSON 字符串；无请求体传空串 */
+export function request(
+  method: string,
+  path: string,
+  payload: string,
+): Promise<HttpResult> {
+  return doRequest(method, path, payload, '', true)
+}
+
+/** 带幂等键的请求 —— 生成、导出这类不能被重复触发的接口用 */
+export function requestIdempotent(
+  method: string,
+  path: string,
+  payload: string,
+  idemKey: string,
+): Promise<HttpResult> {
+  return doRequest(method, path, payload, idemKey, true)
+}
+
+function doRequest(
+  method: string,
+  path: string,
+  payload: string,
+  idemKey: string,
+  allowRetry: boolean,
+): Promise<HttpResult> {
+  return new Promise<HttpResult>((resolve, reject) => {
+    const token: string = accessToken()
+    const body = payload.length > 0 ? payload : undefined
+
+    uni.request({
+      url: BASE_URL + path,
+      method: method,
+      data: body,
+      timeout: TIMEOUT,
+      header: {
+        'Content-Type': 'application/json',
+        // 空串表示匿名（游客）。后端据 X-Device-Id 识别游客身份。
+        'Authorization': token.length > 0 ? 'Bearer ' + token : '',
+        'X-Device-Id': deviceId(),
+        'Idempotency-Key': idemKey,
+      },
+      success: (res) => {
+        const status: number = res.statusCode
+        let text: string = ''
+        const raw: any = res.data
+        if (typeof raw === 'string') {
+          text = raw as string
+        } else {
+          text = JSON.stringify(raw)
+        }
+
+        let env: ApiEnvelope
+        try {
+          env = JSON.parse(text) as ApiEnvelope
+        } catch (e) {
+          reject(new ApiError(50001, '服务返回内容无法解析', status, ''))
+          return
+        }
+
+        const code: number = env.code
+        const traceId: string = env.traceId != null ? env.traceId : ''
+        const serverMsg: string = env.message != null ? env.message : ''
+
+        if (status >= 200 && status < 300 && code === 0) {
+          resolve({
+            ok: true,
+            status: status,
+            code: code,
+            message: serverMsg.length > 0 ? serverMsg : 'ok',
+            traceId: traceId,
+            data: env.data,
+          })
+          return
+        }
+
+        // ── 40102：access 过期，刷新后重试一次 ──
+        if (code === 40102 && allowRetry) {
+          refreshThenRetry(method, path, payload, idemKey).then(resolve).catch(reject)
+          return
+        }
+
+        // ── 40103：refresh 也失效了，清凭证回落游客态 ──
+        if (code === 40103) {
+          clearTokens()
+        }
+
+        // 服务端给了文案就优先用它（更精准）；没有则按码翻译
+        const msg: string = serverMsg.length > 0 ? serverMsg : textOfCode(code)
+        reject(new ApiError(code, msg, status, traceId))
+      },
+      fail: (err) => {
+        reject(new ApiError(-1, textOfCode(-1), 0, ''))
+      },
+    })
+  })
+}
+
+/** 刷新令牌并重放原请求；刷新本身失败则直接以 40103 收场 */
+function refreshThenRetry(
+  method: string,
+  path: string,
+  payload: string,
+  idemKey: string,
+): Promise<HttpResult> {
+  return new Promise<HttpResult>((resolve, reject) => {
+    const rt: string = refreshToken()
+    if (rt.length === 0) {
+      clearTokens()
+      reject(new ApiError(40103, textOfCode(40103), 401, ''))
+      return
+    }
+    uni.request({
+      url: BASE_URL + '/auth/refresh',
+      method: 'POST',
+      data: JSON.stringify({ refreshToken: rt }),
+      timeout: TIMEOUT,
+      header: { 'Content-Type': 'application/json' },
+      success: (res) => {
+        let env: ApiEnvelope
+        try {
+          env = JSON.parse(JSON.stringify(res.data)) as ApiEnvelope
+        } catch (e) {
+          clearTokens()
+          reject(new ApiError(40103, textOfCode(40103), 401, ''))
+          return
+        }
+        if (env.code !== 0) {
+          clearTokens()
+          reject(new ApiError(40103, textOfCode(40103), 401, ''))
+          return
+        }
+        const d: any = env.data
+        saveTokens(d.accessToken as string, d.refreshToken as string, d.expiresIn as number)
+        // allowRetry=false：刷新过了还是 40102 就不再循环，避免死锁
+        doRequest(method, path, payload, idemKey, false).then(resolve).catch(reject)
+      },
+      fail: (err) => {
+        reject(new ApiError(-1, textOfCode(-1), 0, ''))
+      },
+    })
+  })
+}
+
+/* ══════════════════════════════════════════════════════════════
+   便捷包装：断言成功
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * 拿结果，失败就抛 ApiError。
+ * remote 层统一用它，省掉每个函数重复写 if (!r.ok)。
+ */
+export function unwrap(r: HttpResult): any {
+  if (!r.ok) {
+    const e = new ApiError(r.code, r.message, r.status, r.traceId)
+    throw e
+  }
+  return r.data
+}
+
+/**
+ * 需要登录才能用的接口：未登录时本地直接拦下，省一次网络往返。
+ * 游客可用的接口**不要**加这个守卫（FR-10 要求游客能跑通主链路）。
+ */
+export function requireLogin(): void {
+  if (accessToken().length === 0) {
+    throw new ApiError(40101, textOfCode(40101), 401, '')
+  }
+}

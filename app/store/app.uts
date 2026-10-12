@@ -1,0 +1,211 @@
+/**
+ * 会话状态
+ *
+ * 只放「跨页面需要共享」的数据。页面内的表单草稿留在页面自身，
+ * 避免全局状态被瞬时输入污染。
+ *
+ * 游客模式下这些数据仅存在于内存 + 本地缓存，不上传（FR-10）。
+ */
+import { ref } from 'vue'
+import type {
+  ExamInfo,
+  Preference,
+  PlanVO,
+  RecommendItem,
+  ItemFeedback,
+  MarkRecord,
+} from '../types/models.uts'
+
+/* ══════════════════════════════════════════════════════════════
+   空对象兜底
+   模板里对 null 做窄化在小程序端表现不稳定，统一用「空对象 + id 判断」
+   代替可空对象，渲染逻辑更可控。
+   ══════════════════════════════════════════════════════════════ */
+
+export const EMPTY_EXAM: ExamInfo = {
+  region: '',
+  provinces: [],
+  subjectCode: '',
+  subjectGroup: '',
+  tier: '',
+  major: '',
+  targetSchool: '',
+  isCross: false,
+  politics: 0,
+  foreign: 0,
+  course1: 0,
+  course1Name: '',
+  course2: 0,
+  course2Name: '',
+  total: 0,
+}
+
+export const EMPTY_ITEM: RecommendItem = {
+  id: '',
+  programId: '',
+  tierKey: '',
+  tierName: '',
+  university: '',
+  province: '',
+  region: '',
+  department: '',
+  major: '',
+  majorCode: '',
+  majorClass: '',
+  degreeType: '',
+  duration: '',
+  tuition: '',
+  scoreLineTrend: '',
+  applyRatio: '',
+  reExamRatio: '',
+  planTotal: 0,
+  recommendedQuota: 0,
+  quota: 0,
+  history: [],
+  probabilityLow: 0,
+  probabilityHigh: 0,
+  diff: 0,
+  reasons: [],
+  dataVersion: '',
+  sourceYears: '',
+  mark: '',
+}
+
+/* ══════════════════════════════════════════════════════════════
+   状态
+   ══════════════════════════════════════════════════════════════ */
+
+/** FR-08：免责声明勾选确认是生成流程的唯一放行条件 */
+export const disclaimerAccepted = ref<boolean>(false)
+
+/** FR-01 采集结果（已校验、总分已计算） */
+export const examInfo = ref<ExamInfo | null>(null)
+
+/** FR-02 偏好（原样保留空数组，用于判断「是否参与加权」） */
+export const preference = ref<Preference | null>(null)
+
+/** 当前正在查看的方案 */
+export const currentPlan = ref<PlanVO | null>(null)
+
+/** 当前正在查看的推荐项 id */
+export const activeItemId = ref<string>('')
+
+/** S05 当前分档索引 0/1/2 */
+export const activeTier = ref<number>(0)
+
+/** FR-07「我的方案」列表 */
+export const savedPlans = ref<PlanVO[]>([])
+
+/** FR-06 标记 */
+export const marks = ref<MarkRecord[]>([])
+
+/** FR-09 反馈 */
+export const feedbacks = ref<ItemFeedback[]>([])
+
+/** S07 的来源：'plan' | 'detail'，用于决定返回行为 */
+export const adjustFrom = ref<string>('plan')
+
+/**
+ * S04 完成后的落点策略。
+ *
+ * 正常流程下 S04 用 `redirectTo` 落到 S05，生成页出栈即可。
+ * 但从「调整方案」(S07) 重生成时，栈里**已经有一张 S05**，再 `redirectTo` 会让
+ * 方案页在导航栈中出现两次 —— 用户按返回会回到同一份方案的副本上，看起来
+ * 「按了返回没反应」。此时改为 `navigateBack`，直接复用它下方那张 S05。
+ */
+export const regenBackToPlan = ref<boolean>(false)
+
+/* ══════════════════════════════════════════════════════════════
+   纯函数助手
+   ══════════════════════════════════════════════════════════════ */
+
+export function markOf(programId: string): string {
+  const list = marks.value
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].programId === programId) {
+      return list[i].value
+    }
+  }
+  return ''
+}
+
+/** 设置或清除标记；同值再点一次即取消 */
+export function setMark(programId: string, value: string) {
+  const next: MarkRecord[] = []
+  let found = false
+  const list = marks.value
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].programId === programId) {
+      found = true
+      if (list[i].value !== value) {
+        next.push({ programId: programId, value: value })
+      }
+      // 同值 → 不推入，等于取消标记
+    } else {
+      next.push(list[i])
+    }
+  }
+  if (!found) {
+    next.push({ programId: programId, value: value })
+  }
+  marks.value = next
+}
+
+export function clearMarks() {
+  marks.value = []
+}
+
+export function countMark(value: string): number {
+  let n = 0
+  const list = marks.value
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].value === value) n++
+  }
+  return n
+}
+
+/** 从方案中按推荐项 id 取出一条；取不到返回 EMPTY_ITEM */
+export function findItemById(plan: PlanVO | null, itemId: string): RecommendItem {
+  if (plan == null) return EMPTY_ITEM
+  for (let g = 0; g < plan.groups.length; g++) {
+    const items = plan.groups[g].items
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].id === itemId) return items[i]
+    }
+  }
+  return EMPTY_ITEM
+}
+
+/** 从方案中按 programId 取出一条 */
+export function findItemByProgram(plan: PlanVO | null, programId: string): RecommendItem {
+  if (plan == null) return EMPTY_ITEM
+  for (let g = 0; g < plan.groups.length; g++) {
+    const items = plan.groups[g].items
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].programId === programId) return items[i]
+    }
+  }
+  return EMPTY_ITEM
+}
+
+/** 方案内推荐项总数 */
+export function countItems(plan: PlanVO | null): number {
+  if (plan == null) return 0
+  let n = 0
+  for (let g = 0; g < plan.groups.length; g++) {
+    n += plan.groups[g].items.length
+  }
+  return n
+}
+
+/** 重置整个流程（「重新开始」入口） */
+export function resetFlow() {
+  disclaimerAccepted.value = false
+  examInfo.value = null
+  preference.value = null
+  currentPlan.value = null
+  activeItemId.value = ''
+  activeTier.value = 0
+  marks.value = []
+  regenBackToPlan.value = false
+}

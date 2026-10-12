@@ -1,0 +1,46 @@
+<template>
+  <view class="w-full flex flex-row items-center justify-between px-3.5 rounded-cell border border-solid" :class="rowClass">
+    <text class="text-body text-ink2">{{ label }}</text>
+    <view class="flex flex-row items-center">
+      <text class="text-body font-medium text-ink" :class="valueClass">{{ value }}</text>
+      <view v-if="chevron" class="ml-1 flex flex-row items-center">
+        <c-icon name="chevron" :size="16" />
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 表单信息行（label 左、value 右）
+ * 用于 S02 考生信息 / S06 数据表这类「字段—值」结构。
+ */
+import { computed } from 'vue'
+
+const props = defineProps<{
+  label: string
+  value?: string
+  /** 值使用强调色（深色 + SemiBold） */
+  emphasis?: boolean
+  /** 值文本过长时截断（EX-10） */
+  ellipsis?: boolean
+  chevron?: boolean
+  /** 值未填写时的提示色 */
+  placeholder?: boolean
+}>()
+
+const value = computed<string>((): string => (props.value != null ? props.value : ''))
+
+const rowClass = computed<string>((): string => {
+  const parts: string[] = ['h-[46px] border-line bg-white']
+  return parts.join(' ')
+})
+
+const valueClass = computed<string>((): string => {
+  const parts: string[] = []
+  if (props.ellipsis != null && props.ellipsis) parts.push('flex-1 min-w-0 truncate text-right')
+  if (props.emphasis != null && props.emphasis) parts.push('text-h3 font-bold')
+  if (props.placeholder != null && props.placeholder) parts.push('text-ink3 font-normal')
+  return parts.join(' ')
+})
+</script>

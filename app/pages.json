@@ -1,0 +1,71 @@
+{
+  "easycom": {
+    "autoscan": true,
+    "custom": {
+      "^c-(.*)": "components/c-$1/c-$1.uvue"
+    }
+  },
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/disclaimer/disclaimer",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/exam-info/exam-info",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/preference/preference",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/generating/generating",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/plan/plan",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/plan-detail/plan-detail",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/adjust/adjust",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/my-plans/my-plans",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/export/export",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/search/search",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/mine/mine",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/state/state",
+      "style": { "navigationStyle": "custom" }
+    }
+  ],
+  "globalStyle": {
+    "navigationStyle": "custom",
+    "navigationBarTitleText": "研志",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#FFFFFF",
+    "backgroundColorTop": "#FFFFFF",
+    "backgroundColorBottom": "#FFFFFF",
+    "backgroundTextStyle": "dark"
+  }
+}

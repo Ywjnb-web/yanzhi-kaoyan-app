@@ -1,0 +1,105 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-nav-bar lead="back" @lead="back" />
+
+    <view class="w-full flex flex-col px-5 pb-10">
+      <text class="w-full text-h2 font-bold text-ink mt-1">生成方案前，请确认</text>
+      <text class="w-full text-body text-ink2 mt-2">为保障你的知情权，请在生成前阅读以下说明</text>
+
+      <!-- 免责声明卡片 -->
+      <view class="w-full mt-5">
+        <c-card variant="fill" pad="lg">
+          <text class="w-full text-sub font-semibold text-ink">免责声明</text>
+          <text class="w-full text-body text-ink2 mt-3">{{ disclaimerText }}</text>
+          <view class="w-full h-px bg-line mt-3" />
+          <text
+            v-for="(clause, i) in clauses"
+            :key="clause"
+            class="w-full text-note text-ink2"
+            :class="i === 0 ? 'mt-3' : 'mt-2'"
+            >{{ clause }}</text
+          >
+        </c-card>
+      </view>
+
+      <!-- 数据版本条 -->
+      <view
+        class="w-full flex flex-row items-center px-3 h-[44px] rounded-cell border border-solid border-line mt-4"
+      >
+        <text class="flex-1 text-note text-ink2">{{ versionLine }}</text>
+      </view>
+
+      <!-- 勾选确认：本页唯一放行条件 -->
+      <view class="w-full flex flex-row items-center mt-5" @click="toggle">
+        <view
+          class="w-[20px] h-[20px] rounded-md border border-solid flex flex-row items-center justify-center"
+          :class="accepted ? 'bg-ink border-ink' : 'bg-white border-ink3'"
+        >
+          <c-icon v-if="accepted" name="tick" :size="12" />
+        </view>
+        <text class="text-body text-ink ml-2.5">我已阅读并理解上述说明</text>
+      </view>
+
+      <!-- 操作 -->
+      <view class="w-full mt-6">
+        <c-btn label="确认并继续" variant="primary" size="lg" @press="confirm" />
+      </view>
+      <view class="w-full mt-2.5">
+        <c-btn label="返回修改考生信息" variant="secondary" size="md" @press="back" />
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S01 生成前免责声明确认　（FR-08）
+ *
+ * 顺序说明：免责声明放在「点击生成」之后、真正生成之前，而不是首页之后。
+ * PRD FR-08 的原文是「进入生成页时展示」，因此主链路是
+ * S00 → S02 → S03 →（S01）→ S04。
+ * 勾选是唯一放行条件：未勾选时按钮不可用（与 PRD 验收标准一致）。
+ */
+import { computed, ref } from 'vue'
+import {
+  DISCLAIMER_TEXT,
+  DISCLAIMER_CLAUSES,
+  DATA_VERSION,
+  DATA_UPDATED_AT,
+  COVERED_SCHOOLS,
+} from '../../constants/dictionary.uts'
+import { disclaimerAccepted } from '../../store/app.uts'
+import { goBack } from '../../utils/nav.uts'
+
+const accepted = ref<boolean>(disclaimerAccepted.value)
+
+const disclaimerText = computed<string>((): string => DISCLAIMER_TEXT)
+const clauses = computed<string[]>((): string[] => DISCLAIMER_CLAUSES)
+const versionLine = computed<string>((): string => {
+  return (
+    '数据版本 ' +
+    DATA_VERSION +
+    ' · 覆盖院校 ' +
+    COVERED_SCHOOLS.toString() +
+    ' 所 · 更新于 ' +
+    DATA_UPDATED_AT
+  )
+})
+
+function toggle() {
+  accepted.value = !accepted.value
+}
+
+function back() {
+  goBack('/pages/preference/preference')
+}
+
+function confirm() {
+  if (!accepted.value) {
+    uni.showToast({ title: '请先勾选确认', icon: 'none' })
+    return
+  }
+  disclaimerAccepted.value = true
+  uni.redirectTo({ url: '/pages/generating/generating' })
+}
+</script>

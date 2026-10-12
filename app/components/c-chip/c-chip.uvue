@@ -1,0 +1,45 @@
+<template>
+  <view class="flex flex-row items-center justify-center rounded-chip border border-solid" :class="boxClass" @click="onTap">
+    <text class="font-medium" :class="textClass">{{ label }}</text>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 可选标签（Chip）
+ * 选中态用深色实心，未选中用描边 —— 与线框图的单选语义保持一致：
+ * 同一组内选中态唯一，多选组允许多个选中。
+ */
+import { computed } from 'vue'
+
+const props = defineProps<{
+  label: string
+  selected?: boolean
+  /** lg = 38px（表单偏好选择） / sm = 34px（筛选条、反馈） */
+  size?: string
+}>()
+
+const emit = defineEmits(['press'])
+
+const selected = computed<boolean>((): boolean =>
+  props.selected != null ? props.selected : false,
+)
+const size = computed<string>((): string => (props.size != null ? props.size : 'lg'))
+
+const boxClass = computed<string>((): string => {
+  const parts: string[] = []
+  parts.push(size.value === 'sm' ? 'h-[34px] px-3.5' : 'h-[38px] px-4')
+  parts.push(selected.value ? 'bg-ink border-ink' : 'bg-transparent border-line2')
+  return parts.join(' ')
+})
+
+const textClass = computed<string>((): string => {
+  const sizeCls: string = size.value === 'sm' ? 'text-note' : 'text-body'
+  return sizeCls + ' ' + (selected.value ? 'text-white' : 'text-ink2')
+})
+
+function onTap() {
+  // 事件名刻意避开 tap：小程序端组件事件与原生事件同名会重复触发
+  emit('press')
+}
+</script>

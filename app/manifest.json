@@ -1,0 +1,38 @@
+{
+  "name": "研志",
+  "appid": "",
+  "description": "考研择校志愿填报 · 冲/稳/保择校方案生成",
+  "versionName": "1.0.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app": {
+    "distribute": {
+      "android": {
+        "permissions": []
+      },
+      "ios": {},
+      "sdkConfigs": {}
+    }
+  },
+  "mp-weixin": {
+    "appid": "",
+    "componentFramework": "glass-easel",
+    "glassEaselWebview": true,
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "minified": false,
+      "postcss": true
+    },
+    "usingComponents": true,
+    "lazyCodeLoading": "requiredComponents"
+  },
+  "mp-alipay": {
+    "usingComponents": true
+  },
+  "uniStatistics": {
+    "enable": false
+  },
+  "vueVersion": "3",
+  "uni-app-x": {}
+}

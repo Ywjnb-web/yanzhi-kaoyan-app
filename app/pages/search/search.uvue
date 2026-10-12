@@ -1,0 +1,87 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-status-bar />
+
+    <view class="w-full flex flex-col px-5 pb-[120px]">
+      <!-- 搜索框 -->
+      <view class="w-full flex flex-row items-center px-3.5 h-[44px] rounded-btn bg-fill mt-4">
+        <c-icon name="searchMuted" :size="18" />
+        <input
+          class="flex-1 text-body text-ink ml-2"
+          v-model="keyword"
+          placeholder="搜索院校 / 专业 / 院系"
+          placeholder-style="color:#A6ABB3"
+          confirm-type="search"
+        />
+      </view>
+
+      <!-- 筛选 -->
+      <view class="w-full flex flex-row flex-wrap mt-3">
+        <view v-for="chip in filters" :key="chip" class="mr-2 mb-2">
+          <c-chip :label="chip" size="sm" :selected="activeChip === chip" @press="setChip(chip)" />
+        </view>
+      </view>
+
+      <!-- 结果 -->
+      <view v-if="results.length > 0" class="w-full flex flex-col mt-1">
+        <view
+          v-for="(item, i) in results"
+          :key="item.id"
+          class="w-full flex flex-col p-3.5 rounded-btn border border-solid bg-white"
+          :class="i === 0 ? '' : 'mt-3'"
+          :style="item.noData ? 'border-style:dashed;border-color:#D5D8DD' : ''"
+        >
+          <view class="w-full flex flex-row items-center">
+            <text class="flex-1 min-w-0 truncate text-sub font-semibold text-ink">{{ item.university }}</text>
+            <text class="text-micro font-medium text-ink3 ml-2">{{ item.region }}</text>
+          </view>
+          <text class="w-full text-note text-ink2 mt-1.5">{{ item.major }}</text>
+          <text class="w-full text-note mt-1.5" :class="item.noData ? 'text-ink2' : 'text-ink'">{{
+            dataLine(item)
+          }}</text>
+        </view>
+      </view>
+
+      <view v-else class="w-full mt-2">
+        <c-empty title="没有匹配的院校专业" desc="试试换一个关键词，或点「全部」查看数据库收录范围。" />
+      </view>
+
+      <text class="w-full text-cap text-ink3 mt-3"
+        >数据均标注来源年份与数据库版本；缺失时明示「暂无数据」，不显示估算值（FR-03 / EX-03）。复试线、报录比等数值为演示数据，非院校官方发布。</text
+      >
+    </view>
+
+    <c-tab-bar active="search" />
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S10 院校专业检索　（FR-03）
+ *
+ * 独立于择校主链路的入口：不想先填一堆信息、只想先看看「有哪些学校」的
+ * 用户，从这里进入。所有筛选都是本地即时过滤，不产生网络往返。
+ */
+import { computed, ref } from 'vue'
+import type { SearchItem } from '../../types/models.uts'
+import { searchPrograms } from '../../api/index.uts'
+
+const keyword = ref<string>('')
+const activeChip = ref<string>('全部')
+const filters: string[] = ['全部', '计算机', '江苏', '985']
+
+const results = computed<SearchItem[]>((): SearchItem[] => {
+  return searchPrograms(keyword.value, activeChip.value)
+})
+
+function setChip(chip: string) {
+  activeChip.value = chip
+}
+
+function dataLine(item: SearchItem): string {
+  if (item.noData) {
+    return '暂无 2025 年数据（明示缺失，不做估算）'
+  }
+  return item.quota + ' · ' + item.scoreLine + ' · ' + item.applyRatio
+}
+</script>

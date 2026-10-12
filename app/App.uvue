@@ -1,0 +1,22 @@
+<script lang="uts">
+/**
+ * 应用根组件。
+ * 只承载应用级生命周期与全局初始化，不放置任何页面结构。
+ */
+export default {
+  onLaunch() {
+    console.log('[研志] App Launch')
+  },
+  onShow() {
+    console.log('[研志] App Show')
+  },
+  onHide() {
+    console.log('[研志] App Hide')
+  },
+}
+</script>
+
+<style>
+/* Tailwind CSS 4 入口。weapp-tailwindcss 通过 vite.config.ts 的 cssEntries 识别此文件。 */
+@import './main.css';
+</style>

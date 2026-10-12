@@ -1,0 +1,147 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-nav-bar lead="back" title="我的择校方案" :right="versionRight" @lead="back" />
+
+    <view class="w-full flex flex-col px-5 pb-[120px]">
+      <!-- 考生概览：让用户一眼确认「方案是不是按我的条件算的」 -->
+      <view class="w-full flex flex-row items-center justify-between px-3.5 h-[52px] rounded-btn bg-fill mt-3">
+        <text class="flex-1 min-w-0 truncate text-body text-ink2">{{ examSummary }}</text>
+        <text class="text-cap font-medium" :class="weighted ? 'text-ink' : 'text-ink3'">{{ weightTag }}</text>
+      </view>
+
+      <!-- EX-07：分数低于所有库内院校 -->
+      <view v-if="belowAll" class="w-full flex flex-col px-3.5 py-3 rounded-btn bg-brandsoft mt-2.5">
+        <text class="w-full text-note font-medium text-ink">当前分数低于现有数据库中的全部院校</text>
+        <text class="w-full text-cap text-ink2 mt-1"
+          >方案已按保底思路给出，并建议同时准备调剂指引；不强行凑推荐、不诱导加码（EX-07）。</text
+        >
+      </view>
+
+      <!-- 分档切换：页内状态，不跳页 -->
+      <view class="w-full flex flex-row p-1 rounded-cell bg-fill mt-3 h-[40px]">
+        <view
+          v-for="(g, i) in groups"
+          :key="g.tierKey"
+          class="flex-1 h-full flex flex-row items-center justify-center rounded-md border border-solid"
+          :class="i === tierIndex ? 'bg-white border-line' : 'border-transparent'"
+          @click="selectTier(i)"
+        >
+          <text
+            class="text-body"
+            :class="i === tierIndex ? 'font-semibold text-ink' : 'font-medium text-ink2'"
+            >{{ g.tierName }} · {{ g.items.length }} 所</text
+          >
+        </view>
+      </view>
+
+      <!-- 当前档位的说明 -->
+      <text class="w-full text-note text-ink3 mt-2.5">{{ tagline }}</text>
+
+      <!-- 推荐卡列表 -->
+      <view v-if="currentItems.length > 0" class="w-full flex flex-col mt-3">
+        <view v-for="(item, i) in currentItems" :key="item.id" :class="i === 0 ? '' : 'mt-3'">
+          <c-plan-item :item="item" :active="item.id === activeItemId" @detail="openDetail" />
+        </view>
+      </view>
+      <view v-else class="w-full mt-3">
+        <c-empty title="该档位暂无可推荐院校" desc="可回到上一步放宽地域或研究方向的限制后重新生成。" />
+      </view>
+
+      <!-- 免责提示 -->
+      <text class="w-full text-cap text-ink3 mt-4"
+        >上岸概率为基于历史数据的估算区间，非录取承诺；院校名称为真实信息，复试线 / 报录比 / 名额等数值为演示数据，非院校官方发布。</text
+      >
+    </view>
+
+    <!-- 吸底操作条 -->
+    <view class="bottom-bar w-full flex flex-row px-5 pt-4">
+      <view class="flex-1">
+        <c-btn label="调整条件" variant="secondary" size="lg" @press="goAdjust" />
+      </view>
+      <view class="flex-1 ml-2.5">
+        <c-btn label="保存并导出" variant="primary" size="lg" @press="saveAndExport" />
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S05 择校方案总览　（FR-04 · FR-05）
+ *
+ * 分档切换是页内状态而不是跳页：考生在冲/稳/保之间来回比较是这个页面的
+ * 主要行为，任何一次切换都不应该产生导航栈开销。
+ */
+import { computed, ref } from 'vue'
+import type { PlanGroup, RecommendItem } from '../../types/models.uts'
+import { DATA_VERSION } from '../../constants/dictionary.uts'
+import { savePlan } from '../../api/index.uts'
+import { currentPlan, activeTier, activeItemId, savedPlans } from '../../store/app.uts'
+import { goBack } from '../../utils/nav.uts'
+
+const tierIndex = ref<number>(activeTier.value)
+
+const groups = computed<PlanGroup[]>((): PlanGroup[] => {
+  const p = currentPlan.value
+  return p != null ? p.groups : []
+})
+
+const currentItems = computed<RecommendItem[]>((): RecommendItem[] => {
+  const g = groups.value
+  if (tierIndex.value >= g.length) return []
+  return g[tierIndex.value].items
+})
+
+const tagline = computed<string>((): string => {
+  const g = groups.value
+  if (tierIndex.value >= g.length) return ''
+  return g[tierIndex.value].tagline
+})
+
+const examSummary = computed<string>((): string => {
+  const p = currentPlan.value
+  return p != null ? p.examSummary : ''
+})
+
+const weighted = computed<boolean>((): boolean => {
+  const p = currentPlan.value
+  return p != null ? p.weighted : false
+})
+
+const weightTag = computed<string>((): string => (weighted.value ? '已偏好加权' : '未使用偏好加权'))
+
+const belowAll = computed<boolean>((): boolean => {
+  const p = currentPlan.value
+  return p != null ? p.belowAll : false
+})
+
+const versionRight = computed<string>((): string => '数据版本 ' + DATA_VERSION)
+
+function selectTier(i: number) {
+  tierIndex.value = i
+  activeTier.value = i
+}
+
+function openDetail(itemId: string) {
+  activeItemId.value = itemId
+  uni.navigateTo({ url: '/pages/plan-detail/plan-detail' })
+}
+
+function goAdjust() {
+  uni.navigateTo({ url: '/pages/adjust/adjust' })
+}
+
+function saveAndExport() {
+  const p = currentPlan.value
+  if (p == null) {
+    uni.showToast({ title: '暂无可保存的方案', icon: 'none' })
+    return
+  }
+  savedPlans.value = savePlan(p)
+  uni.navigateTo({ url: '/pages/export/export' })
+}
+
+function back() {
+  goBack('/pages/preference/preference')
+}
+</script>

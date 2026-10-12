@@ -1,0 +1,26 @@
+/**
+ * 返回上一级（带兜底）
+ *
+ * 本项目所有页面都是 `navigationStyle: custom` —— 没有原生导航栏，返回动作
+ * 完全由页面内的 `<c-nav-bar>` 承担。这带来一个必须自己兜住的边界：
+ *
+ *   当页面栈深度为 1 时（微信开发者工具用「编译模式」直接以某页为入口、
+ *   或经由 `reLaunch` 落到某页），`navigateBack` 会直接失败，页面毫无反应
+ *   —— 用户表现为「点了返回没反应，被困在当前页」。
+ *
+ * 所以统一走这里：先看栈深，栈里只有一页就直接落到 fallback；否则正常返回，
+ * 万一平台仍判定失败，再用 fail 回调兜一次。保证**任何入口进来都退得出去**。
+ */
+export function goBack(fallback: string = '/pages/index/index'): void {
+  const depth: number = getCurrentPages().length
+  if (depth <= 1) {
+    uni.reLaunch({ url: fallback })
+    return
+  }
+  uni.navigateBack({
+    delta: 1,
+    fail: () => {
+      uni.reLaunch({ url: fallback })
+    },
+  })
+}

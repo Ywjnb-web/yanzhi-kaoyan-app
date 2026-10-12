@@ -1,0 +1,17 @@
+{
+  "name": "yanzhi-miniapp",
+  "private": true,
+  "version": "1.0.0",
+  "description": "研志 · 考研择校志愿填报小程序（uni-app x / UTS / Tailwind CSS 4）",
+  "engines": {
+    "node": "^22.18.0 || >=24.11.0"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "gen:icons": "node scripts/gen-icons.mjs"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.1.14",
+    "weapp-tailwindcss": "^5.3.3"
+  }
+}

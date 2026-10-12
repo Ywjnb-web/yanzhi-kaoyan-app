@@ -1,0 +1,71 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-status-bar />
+
+    <view class="w-full flex flex-col px-5 pb-[120px]">
+      <!-- 顶栏：品牌 + 游客标识 -->
+      <view class="w-full flex flex-row items-center justify-between pt-4">
+        <view class="flex flex-row items-center">
+          <view class="w-[30px] h-[30px] rounded-[9px] bg-ink" />
+          <text class="text-h2 font-bold text-ink ml-2">研志</text>
+        </view>
+        <view class="flex flex-row items-center justify-center px-2.5 h-[26px] rounded-full bg-fill">
+          <text class="text-cap font-medium text-ink2">游客模式 · 免登录</text>
+        </view>
+      </view>
+
+      <!-- 主文案 -->
+      <text class="w-full text-h1 font-bold text-ink mt-6">3 分钟，锁定你的报考志愿</text>
+      <text class="w-full text-body text-ink2 mt-2"
+        >结构化院校数据提供事实，AI 负责理解与排序——所有数字可溯源</text
+      >
+
+      <!-- 示意图占位 -->
+      <view class="w-full h-[118px] rounded-panel bg-fill mt-5 flex flex-col items-center justify-center">
+        <text class="text-note text-ink3">冲 / 稳 / 保 示意</text>
+      </view>
+
+      <!-- 主操作 -->
+      <view class="w-full mt-5">
+        <c-btn label="开始择校" variant="primary" size="lg" @press="start" />
+      </view>
+
+      <!-- 报名期关键节点 -->
+      <text class="w-full text-title font-semibold text-ink mt-7">报名期关键节点</text>
+      <view
+        v-for="(node, i) in nodes"
+        :key="node.name"
+        class="w-full flex flex-row items-center justify-between px-3.5 h-[50px] rounded-btn bg-fill"
+        :class="i === 0 ? 'mt-3' : 'mt-2.5'"
+      >
+        <text class="text-body text-ink2">{{ node.name }}</text>
+        <text class="text-body font-medium text-ink">{{ node.when }}</text>
+      </view>
+
+      <!-- 合规提示 -->
+      <text class="w-full text-cap text-ink3 text-center mt-5"
+        >院校信息来自公开渠道；分数、报录比等数值为演示数据，非院校官方发布，不构成录取承诺</text
+      >
+    </view>
+
+    <c-tab-bar active="index" />
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S00 首页 / 启动　（FR-10 游客免登录 · FR-08 免责声明入口）
+ *
+ * 首页只推一个动作：「开始择校」。报名期节点作为唯一的信息密度补充，
+ * 让考生在没有任何输入前就能确认这件事与自己有关。
+ */
+import { computed } from 'vue'
+import { TIMELINE_NODES } from '../../constants/dictionary.uts'
+import type { TimelineNode } from '../../constants/dictionary.uts'
+
+const nodes = computed<TimelineNode[]>((): TimelineNode[] => TIMELINE_NODES)
+
+function start() {
+  uni.navigateTo({ url: '/pages/exam-info/exam-info' })
+}
+</script>

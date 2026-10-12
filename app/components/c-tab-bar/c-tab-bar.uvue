@@ -1,0 +1,59 @@
+<template>
+  <view class="c-tabbar-wrap w-full flex flex-col bg-white pt-3 px-5">
+    <view
+      class="w-full flex flex-row items-center rounded-full border border-solid border-line bg-white p-1 h-[54px]"
+    >
+      <view
+        v-for="tab in tabs"
+        :key="tab.key"
+        class="flex-1 h-full flex flex-col items-center justify-center rounded-full"
+        :class="tab.key === active ? 'bg-ink' : ''"
+        @click="go(tab)"
+      >
+        <c-icon :name="tab.key === active ? tab.iconActive : tab.icon" :size="18" />
+        <text
+          class="text-micro font-medium mt-1"
+          :class="tab.key === active ? 'text-white' : 'text-ink2'"
+          >{{ tab.label }}</text
+        >
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 底部胶囊导航
+ *
+ * 刻意**不使用小程序原生 tabBar**：原生 tabBar 无法实现设计稿中的
+ * 「圆角胶囊 + 选中项深色填充」形态，且需要 4 组 PNG 图标资源。
+ * 这里用自绘组件 + uni.reLaunch 实现同级切换，视觉与交互完全对齐设计稿。
+ */
+import { computed } from 'vue'
+import { TABS } from '../../constants/dictionary.uts'
+import type { TabItem } from '../../constants/dictionary.uts'
+
+const props = defineProps<{
+  /** index / search / plan / mine */
+  active: string
+}>()
+
+const tabs = computed<TabItem[]>((): TabItem[] => TABS)
+
+function go(tab: TabItem) {
+  if (tab.key === props.active) return
+  uni.reLaunch({ url: tab.path })
+}
+</script>
+
+<style>
+/* 安全区适配：内容区不侵入 iPhone 底部指示条 */
+.c-tabbar-wrap {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding-bottom: calc(21px + env(safe-area-inset-bottom));
+  z-index: 20;
+}
+</style>

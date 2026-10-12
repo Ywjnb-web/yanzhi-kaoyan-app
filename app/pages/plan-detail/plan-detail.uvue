@@ -1,0 +1,210 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-nav-bar lead="back" title="依据详情" :right="posText" @lead="back" />
+
+    <view class="w-full flex flex-col px-5 pb-[120px]">
+      <!-- 概率总览 -->
+      <view class="w-full mt-3">
+        <c-card variant="fill" pad="lg">
+          <view class="w-full flex flex-row items-center">
+            <view
+              class="flex flex-row items-center justify-center px-2 h-[22px] rounded-md border border-solid"
+              :class="tagBoxClass"
+            >
+              <text class="text-cap font-semibold" :class="tagTextClass">{{ item.tierName }}</text>
+            </view>
+            <text class="flex-1 text-title font-bold text-ink ml-2">{{ probabilityLine }}</text>
+          </view>
+          <text class="w-full text-cap text-ink2 mt-2.5"
+            >估算区间，非承诺；依据 {{ item.sourceYears }} 三年历史数据</text
+          >
+          <view class="w-full mt-2.5">
+            <c-progress :percent="item.probabilityHigh" :height="6" />
+          </view>
+        </c-card>
+      </view>
+
+      <!-- 近三年录取数据 -->
+      <text class="w-full text-body font-semibold text-ink mt-5">{{ tableTitle }}</text>
+      <text class="w-full text-cap text-ink3 mt-1.5"
+        >年份 · 复试线 · 报录比 · 复录比 · 统考名额（每年数据均标注来源年份）</text
+      >
+
+      <view v-if="item.history.length > 0" class="w-full flex flex-col mt-2">
+        <view
+          v-for="(row, i) in item.history"
+          :key="row.year"
+          class="w-full flex flex-row items-center justify-between py-2.5"
+          :class="i === 0 ? '' : 'border-t border-solid border-line'"
+        >
+          <text class="w-[68px] text-note font-medium text-ink2">{{ row.year }}</text>
+          <text class="flex-1 tnum text-note text-ink text-right"
+            >{{ row.scoreLine }} · {{ row.applyRatio }} · {{ row.reExamRatio }} · {{ row.quota }}</text
+          >
+        </view>
+      </view>
+      <view v-else class="w-full mt-2">
+        <c-empty title="该专业暂无历史录取数据" desc="数据库未收录时不显示估算值（EX-03）。" />
+      </view>
+
+      <!-- 统考名额强调块：直接把算式摊开 -->
+      <view class="w-full mt-4">
+        <c-card variant="strong" pad="sm">
+          <text class="w-full text-body font-semibold text-ink">{{ quotaFormula }}</text>
+          <text class="w-full text-cap text-ink2 mt-1.5">统考名额单独列示，不与招生计划总数混算</text>
+        </c-card>
+      </view>
+
+      <!-- 推荐理由 -->
+      <text class="w-full text-body font-semibold text-ink mt-5">推荐理由</text>
+      <text
+        v-for="(r, i) in item.reasons"
+        :key="r"
+        class="w-full text-note text-ink2"
+        :class="i === 0 ? 'mt-2' : 'mt-1.5'"
+        >{{ r }}</text
+      >
+
+      <!-- 数据来源 -->
+      <text class="w-full text-cap text-ink3 mt-4">{{ sourceLine }}</text>
+
+      <!-- 反馈（FR-09） -->
+      <view class="w-full mt-5">
+        <text class="w-full text-body font-semibold text-ink">这条推荐对你有帮助吗？</text>
+        <view class="w-full flex flex-row flex-wrap mt-2.5">
+          <view class="mr-2 mb-2">
+            <c-chip label="有用" size="sm" :selected="feedbackKind === 'useful'" @press="sendFeedback('useful')" />
+          </view>
+          <view class="mr-2 mb-2">
+            <c-chip label="无用" size="sm" :selected="feedbackKind === 'useless'" @press="sendFeedback('useless')" />
+          </view>
+          <view class="mr-2 mb-2">
+            <c-chip label="不准确" size="sm" :selected="feedbackKind === 'inaccurate'" @press="sendFeedback('inaccurate')" />
+          </view>
+        </view>
+        <text v-if="feedbackKind.length > 0" class="w-full text-cap text-ink3">{{ feedbackHint }}</text>
+      </view>
+    </view>
+
+    <!-- 吸底操作条 -->
+    <view class="bottom-bar w-full flex flex-row px-5 pt-4">
+      <view class="flex-1">
+        <c-btn label="标记「不考虑」" variant="secondary" size="lg" @press="mark('ignore')" />
+      </view>
+      <view class="flex-1 ml-2.5">
+        <c-btn label="标记「优先考虑」" variant="primary" size="lg" @press="mark('prefer')" />
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S06 推荐项依据详情　（FR-04 · FR-09）
+ *
+ * 这一页是「可解释」的落点：概率区间 + 三年数据表 + 名额算式 + 引用库内数字的
+ * 推荐理由，四者构成一条完整的证据链。反馈入口放在证据链末端，用户此刻
+ * 对「这条推荐准不准」的判断最有依据。
+ */
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { RecommendItem } from '../../types/models.uts'
+import { submitFeedback } from '../../api/index.uts'
+import { currentPlan, activeItemId, EMPTY_ITEM, findItemById, setMark } from '../../store/app.uts'
+import { goBack } from '../../utils/nav.uts'
+
+const item = ref<RecommendItem>(EMPTY_ITEM)
+const feedbackKind = ref<string>('')
+
+const posText = computed<string>((): string => {
+  const plan = currentPlan.value
+  if (plan == null) return ''
+  for (let g = 0; g < plan.groups.length; g++) {
+    const grp = plan.groups[g]
+    for (let i = 0; i < grp.items.length; i++) {
+      if (grp.items[i].id === item.value.id) {
+        return grp.tierName + ' · 第 ' + (i + 1).toString() + ' / ' + grp.items.length.toString() + ' 项'
+      }
+    }
+  }
+  return ''
+})
+
+const probabilityLine = computed<string>((): string => {
+  const it = item.value
+  return '上岸概率 ' + it.probabilityLow.toString() + '% - ' + it.probabilityHigh.toString() + '%'
+})
+
+const tagBoxClass = computed<string>((): string => {
+  const k = item.value.tierKey
+  if (k === 'bao') return 'border-ink bg-ink'
+  if (k === 'chong') return 'border-ink bg-white'
+  return 'border-ink3 bg-white'
+})
+
+const tagTextClass = computed<string>((): string => {
+  const k = item.value.tierKey
+  if (k === 'bao') return 'text-white'
+  if (k === 'chong') return 'text-ink'
+  return 'text-ink2'
+})
+
+const tableTitle = computed<string>((): string => {
+  return '近 3 年录取数据（来源：院校数据库 ' + item.value.dataVersion + ' 版）'
+})
+
+const quotaFormula = computed<string>((): string => {
+  const it = item.value
+  return (
+    '招生计划 ' +
+    it.planTotal.toString() +
+    ' 人 − 推免 ' +
+    it.recommendedQuota.toString() +
+    ' 人 = 统考名额 ' +
+    it.quota.toString() +
+    ' 人'
+  )
+})
+
+const sourceLine = computed<string>((): string => {
+  const it = item.value
+  return (
+    '数据来源：院校公开数据 ' +
+    it.sourceYears +
+    ' · 版本 ' +
+    it.dataVersion +
+    ' · 本页数值为演示数据，非院校官方发布'
+  )
+})
+
+const feedbackHint = computed<string>((): string => {
+  const plan = currentPlan.value
+  const planId = plan != null ? plan.id : '-'
+  return (
+    '反馈已记录：方案 ID ' + planId + ' · 数据版本 ' + item.value.dataVersion + '（便于归因与复现）'
+  )
+})
+
+function sendFeedback(kind: string) {
+  feedbackKind.value = kind
+  const plan = currentPlan.value
+  const planId = plan != null ? plan.id : '-'
+  submitFeedback(item.value.id, planId, kind, '')
+  uni.showToast({ title: '感谢反馈', icon: 'none' })
+}
+
+function mark(value: string) {
+  setMark(item.value.programId, value)
+  uni.showToast({ title: value === 'ignore' ? '已标记：不考虑' : '已标记：优先考虑', icon: 'none' })
+  uni.navigateTo({ url: '/pages/adjust/adjust' })
+}
+
+function back() {
+  goBack('/pages/plan/plan')
+}
+
+onLoad(() => {
+  const found = findItemById(currentPlan.value, activeItemId.value)
+  item.value = found
+})
+</script>

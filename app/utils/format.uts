@@ -1,0 +1,73 @@
+/**
+ * 格式化工具
+ */
+
+function pad2(n: number): string {
+  return n < 10 ? '0' + n.toString() : n.toString()
+}
+
+/** 2026-10-12 14:30 */
+export function formatNow(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const mo = pad2(d.getMonth() + 1)
+  const da = pad2(d.getDate())
+  const h = pad2(d.getHours())
+  const mi = pad2(d.getMinutes())
+  return `${y}-${mo}-${da} ${h}:${mi}`
+}
+
+/** 382.5% → 直接取整，避免出现 382.5000000000001 这类脏数字 */
+export function round(n: number): number {
+  return Math.round(n)
+}
+
+export function clamp(n: number, min: number, max: number): number {
+  if (n < min) return min
+  if (n > max) return max
+  return n
+}
+
+/** 分数冗余表述：比复试线高 14 分 → 「高 14 分」；低 6 分 → 「低 6 分」 */
+export function diffText(diff: number): string {
+  if (diff > 0) {
+    return `高 ${diff} 分`
+  }
+  if (diff < 0) {
+    return `低 ${Math.abs(diff)} 分`
+  }
+  return '持平'
+}
+
+/** 推免占比（整数百分比） */
+export function recommendedShare(recommendedQuota: number, planTotal: number): number {
+  if (planTotal <= 0) return 0
+  return round((recommendedQuota * 100) / planTotal)
+}
+
+/** 数组 → 「368 / 372 / 375」 */
+export function joinSlash(arr: number[]): string {
+  let out = ''
+  for (let i = 0; i < arr.length; i++) {
+    if (i > 0) out += ' / '
+    out += arr[i].toString()
+  }
+  return out
+}
+
+/** 概率区间文案 */
+export function probabilityText(low: number, high: number): string {
+  return `${low}% - ${high}%`
+}
+
+/** 手机号脱敏：138****1234（PII 展示规范，第十一章） */
+export function maskPhone(phone: string): string {
+  if (phone.length !== 11) return phone
+  return phone.substring(0, 3) + '****' + phone.substring(7)
+}
+
+/** 长文案截断（EX-10），返回是否需要展开 */
+export function truncate(text: string, max: number): string {
+  if (text.length <= max) return text
+  return text.substring(0, max) + '…'
+}

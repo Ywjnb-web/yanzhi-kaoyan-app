@@ -1,0 +1,325 @@
+/**
+ * 择校方案规则引擎（对应 FR-04）
+ *
+ * 【职责边界 —— 对应 PRD 5.2「结构化数据库 + 大模型混合」】
+ *   本文件只做两件事：
+ *     1) 从院校数据库取出**事实**（分数线 / 报录比 / 复录比 / 统考名额），原样透传；
+ *     2) 按可配置规则做分档与排序，并生成**引用库内数字**的推荐理由。
+ *   这里不产生任何数据库以外的数字 —— 事实一致率 100% 的红线由此保证。
+ *
+ * 线上应由服务端完成，前端只渲染返回结构；本文件用于本地跑通完整链路。
+ */
+import type {
+  ExamInfo,
+  Preference,
+  PlanVO,
+  PlanGroup,
+  RecommendItem,
+  ProgramRecord,
+  YearRow,
+  MarkRecord,
+} from '../types/models.uts'
+import { PROGRAMS } from '../mock/programs.uts'
+import { DATA_VERSION, DATA_UPDATED_AT, TIER_METAS } from '../constants/dictionary.uts'
+import { clamp, round, joinSlash, recommendedShare, formatNow } from '../utils/format.uts'
+
+/** 分档阈值（ISS-02：规则可配置，上线后与算法联合定义） */
+const THRESHOLD_WEN = 20
+const THRESHOLD_BAO = 42
+
+/** 概率估算参数（ISS-01） */
+const PROB_BASE = 43
+const PROB_PER_DIFF = 0.8
+const PROB_HALF_WIDTH = 7
+const PROB_MIN = 18
+const PROB_MAX = 92
+
+const YEARS: string[] = ['2023', '2024', '2025']
+
+function tierNameOf(tierKey: string): string {
+  for (let i = 0; i < TIER_METAS.length; i++) {
+    if (TIER_METAS[i].key === tierKey) {
+      return TIER_METAS[i].name
+    }
+  }
+  return ''
+}
+
+function tierTaglineOf(tierKey: string): string {
+  for (let i = 0; i < TIER_METAS.length; i++) {
+    if (TIER_METAS[i].key === tierKey) {
+      return TIER_METAS[i].tagline
+    }
+  }
+  return ''
+}
+
+function tierOfDiff(diff: number): string {
+  if (diff < THRESHOLD_WEN) return 'chong'
+  if (diff < THRESHOLD_BAO) return 'wen'
+  return 'bao'
+}
+
+/** 分档配额：受「优先策略」影响（FR-02 验收标准：求稳 → 稳/保占比提升） */
+function quotaOfTier(strategies: string[]): number[] {
+  let chong = 3
+  let wen = 4
+  let bao = 3
+  for (let i = 0; i < strategies.length; i++) {
+    const s = strategies[i]
+    if (s === '求稳上岸优先') {
+      chong = 2
+      wen = 4
+      bao = 4
+    } else if (s === '冲名校优先') {
+      chong = 4
+      wen = 4
+      bao = 2
+    } else if (s === '性价比优先') {
+      chong = 2
+      wen = 3
+      bao = 5
+    }
+  }
+  return [chong, wen, bao]
+}
+
+/** 概率估算：全部输入均来自数据库事实字段 + 考生总分，输出为区间 */
+function estimateProbability(diff: number, applyRatio: number, reExamRatio: number): number {
+  let p = PROB_BASE + diff * PROB_PER_DIFF
+  p = p - (applyRatio - 3.0) * 1.6
+  p = p - (reExamRatio - 1.2) * 12
+  return clamp(p, PROB_MIN, PROB_MAX)
+}
+
+/** 逐年数据表（每条都标注来源年份） */
+function buildHistory(p: ProgramRecord, quota: number): YearRow[] {
+  const rows: YearRow[] = []
+  for (let i = 0; i < YEARS.length; i++) {
+    const row: YearRow = {
+      year: YEARS[i] + ' 年',
+      scoreLine: p.scoreLines[i].toString() + ' 分',
+      applyRatio: p.applyRatios[i].toString() + ':1',
+      reExamRatio: p.reExamRatios[i].toString() + ':1',
+      quota: quota.toString() + ' 人',
+    }
+    rows.push(row)
+  }
+  return rows
+}
+
+/** 推荐理由：每一句都必须引用库内具体数字，且能指回来源年份 */
+function buildReasons(p: ProgramRecord, exam: ExamInfo, diff: number, quota: number): string[] {
+  const reasons: string[] = []
+  const first = p.scoreLines[0]
+  const last = p.scoreLines[2]
+  const share = recommendedShare(p.recommendedQuota, p.planTotal)
+  const trend = p.scoreLines[2] - p.scoreLines[0]
+
+  if (diff >= 0) {
+    reasons.push(
+      `· 近三年复试线 ${first} → ${last}，你 ${exam.total} 分高出 2025 年线 ${diff} 分，形成为期三年的缓冲。`,
+    )
+  } else {
+    reasons.push(
+      `· 近三年复试线 ${first} → ${last}，你 ${exam.total} 分距 2025 年线仍差 ${Math.abs(diff)} 分，属冲刺档。`,
+    )
+  }
+
+  if (trend > 0) {
+    reasons.push(`· 复试线三年累计上行 ${trend} 分，需按上行趋势预留分数冗余。`)
+  } else {
+    reasons.push(`· 复试线三年基本持平，分数波动风险较低。`)
+  }
+
+  if (share >= 50) {
+    reasons.push(
+      `· 统考名额仅 ${quota} 人、推免占比 ${share}%，名额稳定性偏弱，建议同步准备保底项。`,
+    )
+  } else {
+    reasons.push(`· 统考名额 ${quota} 人、推免占比 ${share}%，名额规模在同类中属中等水平。`)
+  }
+
+  reasons.push(
+    `· 报录比 ${p.applyRatios[2]}:1、复录比 ${p.reExamRatios[2]}:1，数据来源 2025 年。`,
+  )
+  return reasons
+}
+
+function buildItem(
+  p: ProgramRecord,
+  exam: ExamInfo,
+  tierKey: string,
+  mark: string,
+): RecommendItem {
+  const latestLine = p.scoreLines[2]
+  const diff = exam.total - latestLine
+  const quota = p.planTotal - p.recommendedQuota
+  const center = estimateProbability(diff, p.applyRatios[2], p.reExamRatios[2])
+  const low = clamp(center - PROB_HALF_WIDTH, PROB_MIN, 95)
+  const high = clamp(center + PROB_HALF_WIDTH, 25, 96)
+
+  const item: RecommendItem = {
+    id: 'IT-' + p.id,
+    programId: p.id,
+    tierKey: tierKey,
+    tierName: tierNameOf(tierKey),
+    university: p.university,
+    province: p.province,
+    region: p.region,
+    department: p.department,
+    major: p.major,
+    majorCode: p.majorCode,
+    majorClass: p.majorClass,
+    degreeType: p.degreeType,
+    duration: p.duration,
+    tuition: p.tuition,
+    scoreLineTrend: joinSlash(p.scoreLines),
+    applyRatio: p.applyRatios[2].toString() + ' : 1',
+    reExamRatio: p.reExamRatios[2].toString() + ':1',
+    planTotal: p.planTotal,
+    recommendedQuota: p.recommendedQuota,
+    quota: quota,
+    history: buildHistory(p, quota),
+    probabilityLow: round(low),
+    probabilityHigh: round(high),
+    diff: diff,
+    reasons: buildReasons(p, exam, diff, quota),
+    dataVersion: DATA_VERSION,
+    sourceYears: '2023 - 2025',
+    mark: mark,
+  }
+  return item
+}
+
+function sortDescByProbability(items: RecommendItem[]): RecommendItem[] {
+  return items.sort((a: RecommendItem, b: RecommendItem): number => {
+    if (b.probabilityHigh !== a.probabilityHigh) {
+      return b.probabilityHigh - a.probabilityHigh
+    }
+    return a.quota - b.quota
+  })
+}
+
+/**
+ * 考生概览文案（S05 顶部信息条 / S08 列表摘要）。
+ *
+ * 刻意控制长度：省份只列前 2 个 + 总数，其余信息按需追加，
+ * 保证在 52px 高的概览条里不会撑成多行。
+ */
+function buildExamSummary(exam: ExamInfo): string {
+  const parts: string[] = []
+
+  if (exam.region.length > 0) parts.push(exam.region)
+
+  const n = exam.provinces.length
+  if (n > 0) {
+    let head = ''
+    const limit = n > 2 ? 2 : n
+    for (let i = 0; i < limit; i++) {
+      if (i > 0) head += '/'
+      head += exam.provinces[i]
+    }
+    parts.push(n > 2 ? head + ' 等 ' + n.toString() + ' 省' : head)
+  }
+
+  parts.push(exam.total.toString() + ' 分')
+  if (exam.subjectCode.length > 0) parts.push(exam.subjectCode)
+  if (exam.targetSchool.length > 0) parts.push('目标 ' + exam.targetSchool)
+
+  let out = ''
+  for (let i = 0; i < parts.length; i++) {
+    if (i > 0) out += ' · '
+    out += parts[i]
+  }
+  return out
+}
+
+/**
+ * 生成择校方案。
+ * @param marks  上一次的标记（FR-06），重新生成时保留
+ */
+export function buildPlan(
+  exam: ExamInfo,
+  pref: Preference,
+  marks: MarkRecord[],
+): PlanVO {
+  const buckets: RecommendItem[][] = [[], [], []]
+  const keys: string[] = ['chong', 'wen', 'bao']
+
+  let allBelow = true
+  let candidateCount = 0
+
+  for (let i = 0; i < PROGRAMS.length; i++) {
+    const p = PROGRAMS[i]
+    // 数据缺失的院校不进入推荐（EX-03：明示暂无数据，不估算）
+    if (p.noData) continue
+    candidateCount++
+
+    const diff = exam.total - p.scoreLines[2]
+    if (diff >= 0) allBelow = false
+
+    let mark = ''
+    for (let m = 0; m < marks.length; m++) {
+      if (marks[m].programId === p.id) {
+        mark = marks[m].value
+        break
+      }
+    }
+
+    const tierKey = tierOfDiff(diff)
+    const item = buildItem(p, exam, tierKey, mark)
+
+    if (tierKey === 'chong') buckets[0].push(item)
+    else if (tierKey === 'wen') buckets[1].push(item)
+    else buckets[2].push(item)
+  }
+
+  const plan = quotaOfTier(pref.strategies)
+  const groups: PlanGroup[] = []
+
+  for (let g = 0; g < keys.length; g++) {
+    const sorted = sortDescByProbability(buckets[g])
+    const picked: RecommendItem[] = []
+    for (let k = 0; k < sorted.length; k++) {
+      if (picked.length >= plan[g]) break
+      // 「不考虑」的院校不再出现（FR-06）
+      if (sorted[k].mark === 'ignore') continue
+      picked.push(sorted[k])
+    }
+    const group: PlanGroup = {
+      tierKey: keys[g],
+      tierName: tierNameOf(keys[g]),
+      tagline: tierTaglineOf(keys[g]),
+      items: picked,
+    }
+    groups.push(group)
+  }
+
+  const weighted =
+    pref.strategies.length > 0 ||
+    pref.regions.length > 0 ||
+    pref.directions.length > 0 ||
+    pref.careers.length > 0 ||
+    pref.degreeType !== '不限'
+
+  const planVO: PlanVO = {
+    id: 'PLAN-' + Date.now().toString(),
+    name: planNameOf(pref),
+    createdAt: formatNow(),
+    examSummary: buildExamSummary(exam),
+    dataVersion: DATA_VERSION + '（更新于 ' + DATA_UPDATED_AT + '）',
+    weighted: weighted,
+    groups: groups,
+    belowAll: allBelow && candidateCount > 0,
+  }
+  return planVO
+}
+
+/** 方案命名：优先策略命名优先，否则用默认名 */
+function planNameOf(pref: Preference): string {
+  if (pref.strategies.length > 0) {
+    return pref.strategies[0] + ' 方案'
+  }
+  return '冲 / 稳 / 保 择校方案'
+}

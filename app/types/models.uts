@@ -1,0 +1,232 @@
+/**
+ * 领域模型 —— 对齐 PRD 第十章「核心实体与关系」
+ *
+ *   考生 1—N 方案
+ *   方案 1—N 推荐项
+ *   推荐项 N—1 院校专业（数据库）
+ *
+ * 院校名称 / 院系 / 专业 / 专业代码为真实公开信息；
+ * 分数线、报录比、复录比、招生计划等**数值均为演示用虚构数据**，非院校官方发布。
+ */
+
+/* ══════════════════════════════════════════════════════════════
+   考生信息（FR-01）
+   ══════════════════════════════════════════════════════════════ */
+
+/** 表单态：输入框的值一律是字符串，提交时再解析为数值 */
+export interface ExamForm {
+  /** 意向省份（可多选；先按 A / B 区分组浏览，可跨区累计添加） */
+  provinces: string[]
+  /** 报考科目代码，如 085401（6 位数字） */
+  subjectCode: string
+  subjectGroup: string
+  tier: string
+  /** 本科专业（可从常用项点选，也可手动输入） */
+  major: string
+  /** 目标院校（关键词检索或自由输入，选填） */
+  targetSchool: string
+  isCross: boolean
+  politics: string
+  foreign: string
+  course1: string
+  course2: string
+}
+
+/** 提交态：已完成校验与计算的考生信息 */
+export interface ExamInfo {
+  /** 由意向省份推导：A 区 / B 区 / A / B 区；无意向省份时为空串 */
+  region: string
+  /** 意向省份（可多选） */
+  provinces: string[]
+  /** 报考科目代码，如 085401 */
+  subjectCode: string
+  subjectGroup: string
+  tier: string
+  major: string
+  /** 目标院校；空串表示未指定，方案仅按分数区间推荐 */
+  targetSchool: string
+  isCross: boolean
+  politics: number
+  foreign: number
+  course1: number
+  course1Name: string
+  course2: number
+  course2Name: string
+  /** 各科之和，系统自动计算 */
+  total: number
+}
+
+/* ══════════════════════════════════════════════════════════════
+   兴趣偏好（FR-02）—— 全部选填
+   ══════════════════════════════════════════════════════════════ */
+
+export interface Preference {
+  /** 优先策略：求稳上岸优先 / 冲名校优先 / 地域优先 / 性价比优先 */
+  strategies: string[]
+  regions: string[]
+  directions: string[]
+  careers: string[]
+  /** 学硕 / 专硕 / 不限 */
+  degreeType: string
+}
+
+/* ══════════════════════════════════════════════════════════════
+   院校数据库（FR-03）
+   ══════════════════════════════════════════════════════════════ */
+
+/** 院校数据库中的一条「院系专业」记录。全部事实字段的唯一来源。 */
+export interface ProgramRecord {
+  id: string
+  university: string
+  province: string
+  region: string
+  department: string
+  major: string
+  /** 专业代码，如 085404 —— 与考生填写的「报考科目代码」同一体系 */
+  majorCode: string
+  majorClass: string
+  /** 专硕 / 学硕 */
+  degreeType: string
+  duration: string
+  tuition: string
+  /** 招生计划总数 */
+  planTotal: number
+  /** 推免录取数 */
+  recommendedQuota: number
+  /** 近三年复试线：2023 / 2024 / 2025 */
+  scoreLines: number[]
+  /** 近三年报录比 */
+  applyRatios: number[]
+  /** 近三年复录比 */
+  reExamRatios: number[]
+  directionTags: string[]
+  regionTags: string[]
+  /** 当年数据是否缺失 —— 缺失时明示「暂无数据」，不做估算 */
+  noData: boolean
+}
+
+/** 逐年录取数据（用于 S06 数据表） */
+export interface YearRow {
+  year: string
+  scoreLine: string
+  applyRatio: string
+  reExamRatio: string
+  quota: string
+}
+
+/* ══════════════════════════════════════════════════════════════
+   择校方案（FR-04 / FR-05）
+   ══════════════════════════════════════════════════════════════ */
+
+export interface RecommendItem {
+  id: string
+  programId: string
+  /** chong / wen / bao */
+  tierKey: string
+  /** 冲 / 稳 / 保 */
+  tierName: string
+  university: string
+  province: string
+  region: string
+  department: string
+  major: string
+  /** 专业代码，如 085404 */
+  majorCode: string
+  majorClass: string
+  degreeType: string
+  duration: string
+  tuition: string
+  /** 近三年复试线，如 368 / 372 / 375 */
+  scoreLineTrend: string
+  applyRatio: string
+  reExamRatio: string
+  /** 招生计划总数 */
+  planTotal: number
+  /** 推免数 */
+  recommendedQuota: number
+  /** 统考名额 = 计划 − 推免 */
+  quota: number
+  history: YearRow[]
+  probabilityLow: number
+  probabilityHigh: number
+  /** 与自身总分的差值 */
+  diff: number
+  reasons: string[]
+  dataVersion: string
+  sourceYears: string
+  /** 用户标记：不考虑 / 优先考虑 / 无 */
+  mark: string
+}
+
+export interface PlanGroup {
+  tierKey: string
+  tierName: string
+  tagline: string
+  items: RecommendItem[]
+}
+
+export interface PlanVO {
+  id: string
+  name: string
+  createdAt: string
+  examSummary: string
+  dataVersion: string
+  /** 是否使用了偏好加权；false 时页面必须标注「未使用偏好加权」 */
+  weighted: boolean
+  groups: PlanGroup[]
+  /** 命中 EX-07：分数低于所有库内院校 */
+  belowAll: boolean
+}
+
+/* ══════════════════════════════════════════════════════════════
+   检索（FR-03）
+   ══════════════════════════════════════════════════════════════ */
+
+export interface SearchItem {
+  id: string
+  university: string
+  province: string
+  region: string
+  major: string
+  degreeType: string
+  quota: string
+  scoreLine: string
+  applyRatio: string
+  noData: boolean
+}
+
+/* ══════════════════════════════════════════════════════════════
+   用户标记（FR-06）
+   ══════════════════════════════════════════════════════════════ */
+
+/** 用数组而不是 Map 承载标记：小程序端 Map 的迭代与响应式代价更高，
+ *  且「不考虑 / 优先考虑」天然是一张有序的小列表。 */
+export interface MarkRecord {
+  programId: string
+  /** ignore / prefer */
+  value: string
+}
+
+/* ══════════════════════════════════════════════════════════════
+   反馈（FR-09）
+   ══════════════════════════════════════════════════════════════ */
+
+export interface ItemFeedback {
+  itemId: string
+  planId: string
+  /** useful / useless / inaccurate */
+  kind: string
+  reason: string
+  dataVersion: string
+  createdAt: string
+}
+
+/* ══════════════════════════════════════════════════════════════
+   异常态（第十二章 EX-01 ~ EX-10）
+   ══════════════════════════════════════════════════════════════ */
+
+export interface ExceptionSpec {
+  code: string
+  title: string
+  strategy: string
+}

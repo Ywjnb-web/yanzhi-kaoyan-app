@@ -1,0 +1,130 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-status-bar />
+
+    <view class="w-full flex flex-col px-5 pb-[120px]">
+      <text class="w-full text-h2 font-bold text-ink pt-4">我的</text>
+
+      <!-- 账号态：游客先行，符合 FR-10 的可绕过策略 -->
+      <view class="w-full flex flex-row items-center mt-4 p-3.5 rounded-card bg-fill">
+        <view class="w-[44px] h-[44px] rounded-full bg-ink" />
+        <view class="flex-1 flex flex-col ml-3">
+          <text class="w-full text-lead font-semibold text-ink">游客模式</text>
+          <text class="w-full text-note text-ink2 mt-1">免登录可用全部核心功能，数据仅保存在本机</text>
+        </view>
+      </view>
+
+      <text class="w-full text-body font-semibold text-ink mt-6">我的数据</text>
+      <view class="w-full flex flex-col mt-2.5">
+        <view
+          class="w-full flex flex-row items-center justify-between px-3.5 h-[48px] rounded-btn border border-solid border-line bg-white"
+          @click="toMyPlans"
+        >
+          <text class="text-body text-ink2">我的方案</text>
+          <view class="flex flex-row items-center">
+            <text class="text-body font-medium text-ink mr-1">{{ planCount }} 个</text>
+            <c-icon name="chevron" :size="16" />
+          </view>
+        </view>
+
+        <view
+          class="w-full flex flex-row items-center justify-between px-3.5 h-[48px] rounded-btn border border-solid border-line bg-white mt-2.5"
+          @click="removeAll"
+        >
+          <text class="text-body text-ink2">删除我的数据（注销后 30 天内清除）</text>
+          <c-icon name="chevron" :size="16" />
+        </view>
+      </view>
+
+      <text class="w-full text-body font-semibold text-ink mt-6">产品说明</text>
+      <view class="w-full flex flex-col mt-2.5">
+        <view
+          class="w-full flex flex-row items-center justify-between px-3.5 h-[48px] rounded-btn border border-solid border-line bg-white"
+          @click="toState"
+        >
+          <text class="text-body text-ink2">异常与边界态清单</text>
+          <c-icon name="chevron" :size="16" />
+        </view>
+
+        <view
+          class="w-full flex flex-col px-3.5 py-3 rounded-btn border border-solid border-line bg-white mt-2.5"
+        >
+          <text class="w-full text-body text-ink2">数据版本</text>
+          <text class="w-full text-note font-medium text-ink mt-1.5">{{ versionLine }}</text>
+        </view>
+      </view>
+
+      <!-- 合规声明（FR-08 第三处展示） -->
+      <view class="w-full flex flex-col px-3.5 py-3 rounded-btn bg-fill mt-5">
+        <text class="w-full text-cap text-ink2">{{ disclaimer }}</text>
+        <text class="w-full text-cap text-ink3 mt-1.5"
+          >院校名称等为真实公开信息；复试线、报录比、统考名额等数值为演示数据，非院校官方发布。本产品不提供任何录取保证。</text
+        >
+      </view>
+    </view>
+
+    <c-tab-bar active="mine" />
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 我的（底部 Tab）
+ *
+ * 线框图的 12 个界面里没有这一屏，但底部导航第 4 个 Tab 需要有落点。
+ * 内容刻意做得很轻：账号态说明 + 数据管理 + 合规声明，
+ * 不引入任何线框图中不存在的业务能力。
+ */
+import { computed, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import {
+  DATA_VERSION,
+  DATA_UPDATED_AT,
+  COVERED_SCHOOLS,
+  DISCLAIMER_TEXT,
+} from '../../constants/dictionary.uts'
+import { listPlans, clearAllLocalData } from '../../api/index.uts'
+import { resetFlow, savedPlans } from '../../store/app.uts'
+
+const planCount = ref<number>(0)
+
+const versionLine = computed<string>((): string => {
+  return (
+    DATA_VERSION +
+    ' · 覆盖院校 ' +
+    COVERED_SCHOOLS.toString() +
+    ' 所 · 更新于 ' +
+    DATA_UPDATED_AT
+  )
+})
+
+const disclaimer = computed<string>((): string => DISCLAIMER_TEXT)
+
+function toMyPlans() {
+  uni.reLaunch({ url: '/pages/my-plans/my-plans' })
+}
+
+function toState() {
+  uni.navigateTo({ url: '/pages/state/state' })
+}
+
+function removeAll() {
+  uni.showModal({
+    title: '删除我的数据',
+    content: '将清除本地保存的全部方案与填写记录，确认继续？',
+    success: (res) => {
+      if (res.confirm) {
+        clearAllLocalData()
+        resetFlow()
+        planCount.value = 0
+        savedPlans.value = []
+        uni.showToast({ title: '已清除', icon: 'none' })
+      }
+    },
+  })
+}
+
+onShow(() => {
+  planCount.value = listPlans().length
+})
+</script>

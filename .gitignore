@@ -1,0 +1,18 @@
+# ── 项目个人数据 / 本地记忆 / 工具配置 ──
+# .workbuddy 含 mcp 配置（可能含密钥）、项目记忆等本地数据，禁止提交
+.workbuddy/
+
+# ── 微信开发者工具自动生成的配置 ──
+# 根目录那份为冗余（含本地绝对路径），忽略；app/ 下的 project.config.json 是工程共享配置，保留提交
+/project.config.json
+# 私人配置（含本地设置，各层级均不提交）
+**/project.private.config.json
+
+# ── 依赖与构建产物（app/ 下的忽略规则见 app/.gitignore，这里全局兜底）──
+node_modules/
+unpackage/
+dist/
+.hbuilderx/
+*.local
+.DS_Store
+Thumbs.db

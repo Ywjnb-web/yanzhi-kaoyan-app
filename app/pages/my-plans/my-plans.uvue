@@ -1,0 +1,139 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-status-bar />
+
+    <view class="w-full flex flex-col px-5 pb-[120px]">
+      <view class="w-full flex flex-row items-end justify-between pt-4">
+        <text class="text-h2 font-bold text-ink">我的方案</text>
+        <text class="text-note text-ink2">{{ countText }}</text>
+      </view>
+
+      <!-- 方案列表 -->
+      <view v-if="plans.length > 0" class="w-full flex flex-col mt-4">
+        <view
+          v-for="(p, i) in plans"
+          :key="p.id"
+          class="w-full flex flex-col p-3.5 rounded-card border border-solid border-line bg-white"
+          :class="i === 0 ? '' : 'mt-3'"
+        >
+          <view class="w-full flex flex-row items-center justify-between">
+            <text class="flex-1 min-w-0 truncate text-lead font-semibold text-ink">{{ p.name }}</text>
+            <text class="text-cap text-ink3 ml-2">{{ p.createdAt }}</text>
+          </view>
+
+          <text class="w-full text-note text-ink2 mt-2">{{ summaryOf(p) }}</text>
+
+          <view class="w-full flex flex-row items-center mt-3">
+            <text class="text-note font-medium text-ink mr-4" @click="open(p)">查看</text>
+            <text class="text-note font-medium text-ink mr-4" @click="exportPlan(p)">导出</text>
+            <text class="text-note font-medium text-ink2" @click="remove(p)">删除</text>
+          </view>
+        </view>
+      </view>
+
+      <view v-else class="w-full mt-4">
+        <c-empty
+          title="还没有保存过方案"
+          desc="完成一次择校流程后，方案会保存在这里，含生成时间与数据版本。"
+        />
+        <view class="w-full mt-2">
+          <c-btn label="去生成一份方案" variant="primary" size="lg" @press="startFlow" />
+        </view>
+      </view>
+
+      <!-- 隐私入口（FR-10） -->
+      <view
+        class="w-full flex flex-row items-center justify-between px-3.5 h-[48px] rounded-btn border border-solid border-line mt-5"
+        @click="removeAll"
+      >
+        <text class="text-body text-ink2">删除我的数据（注销后 30 天内清除）</text>
+        <c-icon name="chevron" :size="16" />
+      </view>
+    </view>
+
+    <c-tab-bar active="plan" />
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S08 我的方案　（FR-07 · FR-10）
+ *
+ * 游客模式下数据存在本地缓存，因此列表在 onShow 里重新读取 —— 从导出页或
+ * 方案页返回时能立刻看到最新状态，不需要用户手动刷新。
+ */
+import { computed, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import type { PlanVO } from '../../types/models.uts'
+import { listPlans, removePlan, clearAllLocalData } from '../../api/index.uts'
+import { savedPlans, currentPlan, resetFlow } from '../../store/app.uts'
+
+const plans = ref<PlanVO[]>([])
+
+const countText = computed<string>((): string => {
+  const n = plans.value.length
+  return n === 0 ? '暂无' : n.toString() + ' 个'
+})
+
+function summaryOf(p: PlanVO): string {
+  const groups = p.groups
+  let parts = p.examSummary + ' · ' + p.dataVersion
+  const nums: string[] = []
+  for (let i = 0; i < groups.length; i++) {
+    nums.push(groups[i].tierName + ' ' + groups[i].items.length.toString())
+  }
+  return parts + ' · 含 ' + nums.join(' / ')
+}
+
+function refresh() {
+  plans.value = listPlans()
+  savedPlans.value = plans.value
+}
+
+function open(p: PlanVO) {
+  currentPlan.value = p
+  uni.navigateTo({ url: '/pages/plan/plan' })
+}
+
+function exportPlan(p: PlanVO) {
+  currentPlan.value = p
+  uni.navigateTo({ url: '/pages/export/export' })
+}
+
+function remove(p: PlanVO) {
+  uni.showModal({
+    title: '删除方案',
+    content: '删除后不可恢复，确认删除「' + p.name + '」？',
+    success: (res) => {
+      if (res.confirm) {
+        removePlan(p.id)
+        refresh()
+        uni.showToast({ title: '已删除', icon: 'none' })
+      }
+    },
+  })
+}
+
+function removeAll() {
+  uni.showModal({
+    title: '删除我的数据',
+    content: '将清除本地保存的全部方案与填写记录，确认继续？',
+    success: (res) => {
+      if (res.confirm) {
+        clearAllLocalData()
+        resetFlow()
+        refresh()
+        uni.showToast({ title: '已清除', icon: 'none' })
+      }
+    },
+  })
+}
+
+function startFlow() {
+  uni.navigateTo({ url: '/pages/exam-info/exam-info' })
+}
+
+onShow(() => {
+  refresh()
+})
+</script>

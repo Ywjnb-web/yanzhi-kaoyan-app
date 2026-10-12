@@ -1,0 +1,33 @@
+<template>
+  <image class="shrink-0" :src="src" :style="boxStyle" mode="aspectFit" />
+</template>
+
+<script setup lang="uts">
+/**
+ * 图标
+ *
+ * 小程序端 <image> 无法继承 currentColor，因此图标按「形状 × 颜色」预渲染为
+ * base64 SVG（见 utils/icons.uts），由 name 直接选变体。
+ *
+ * name 见 utils/icons.uts：back / close / chevron / tick / checkCircle /
+ * stepActive / stepIdle / info / searchMuted / searchInk / searchWhite /
+ * homeMuted / homeWhite / docMuted / docWhite / userMuted / userWhite
+ */
+import { computed } from 'vue'
+import { ICONS } from '../../utils/icons.uts'
+
+const props = defineProps<{
+  name: string
+  size?: number
+}>()
+
+const src = computed<string>((): string => {
+  const v = ICONS.get(props.name)
+  return v != null ? v : ''
+})
+
+const boxStyle = computed<string>((): string => {
+  const s: number = props.size != null ? props.size : 18
+  return 'width:' + s.toString() + 'px;height:' + s.toString() + 'px'
+})
+</script>

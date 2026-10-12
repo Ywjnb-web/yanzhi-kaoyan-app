@@ -1,0 +1,23 @@
+<template>
+  <view class="w-full flex flex-col items-center justify-center py-10 px-8">
+    <text class="text-sub font-medium text-ink text-center">{{ title }}</text>
+    <text v-if="desc.length > 0" class="text-note text-ink3 text-center mt-2">{{ desc }}</text>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 空态 / 边界态
+ *
+ * PRD 第十二章要求「异常态一律不返回空白页」，所以任何列表为空时都应给出
+ * 可解释的文案与下一步动作，而不是一片空白。
+ */
+import { computed } from 'vue'
+
+const props = defineProps<{
+  title: string
+  desc?: string
+}>()
+
+const desc = computed<string>((): string => (props.desc != null ? props.desc : ''))
+</script>

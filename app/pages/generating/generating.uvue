@@ -1,0 +1,189 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-nav-bar lead="close" title="方案生成中" @lead="cancel" />
+
+    <view class="w-full flex flex-col px-5 pb-10">
+      <text class="w-full text-h2 font-bold text-ink mt-5">正在生成你的择校方案</text>
+      <text class="w-full text-body text-ink2 mt-2">预计 30 秒内完成 · 正在检索院校数据库并做加权排序</text>
+
+      <!-- 进度卡片：加载态必须是「有内容的等待」，不是空白页 -->
+      <view class="w-full mt-5">
+        <c-card variant="fill" pad="lg">
+          <view
+            v-for="(s, i) in stages"
+            :key="s.label"
+            class="w-full flex flex-row items-center"
+            :class="i === 0 ? '' : 'mt-3'"
+          >
+            <c-icon :name="iconOf(i)" :size="18" />
+            <text class="flex-1 ml-2.5 text-body" :class="textClassOf(i)"
+              >{{ s.label }}{{ s.detail }}</text
+            >
+          </view>
+
+          <view class="w-full mt-4">
+            <c-progress :percent="percent" :height="6" />
+          </view>
+          <text class="w-full text-note text-ink2 mt-2.5">{{ percentText }}</text>
+        </c-card>
+      </view>
+
+      <!-- 骨架屏 -->
+      <view class="w-full flex flex-col mt-4">
+        <view
+          v-for="(n, i) in skeletons"
+          :key="n"
+          class="w-full h-[72px] rounded-btn bg-fill"
+          :class="i === 0 ? '' : 'mt-3'"
+        />
+      </view>
+
+      <text class="w-full text-note text-ink3 mt-4"
+        >生成期间可离开，完成后通知你；超过 30 秒未返回将提示重试（EX-05）。</text
+      >
+
+      <view class="w-full mt-5">
+        <c-btn label="取消生成" variant="ghost" size="md" @press="cancel" />
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S04 方案生成中（FR-05 四态之「加载态」）
+ *
+ * 进度由三段真实阶段驱动，不是假进度条：检索候选池 → 校验数据库事实 →
+ * 模型排序。三段跑完才跳转，保证「等待」与「后端实际在做什么」一一对应。
+ */
+import { computed, ref } from 'vue'
+import { onLoad, onUnload } from '@dcloudio/uni-app'
+import type { ExamInfo, Preference } from '../../types/models.uts'
+import { generateStages, generatePlan } from '../../api/index.uts'
+import type { GenerateStage } from '../../api/index.uts'
+import { COVERED_SCHOOLS } from '../../constants/dictionary.uts'
+import {
+  examInfo,
+  preference,
+  currentPlan,
+  marks,
+  EMPTY_EXAM,
+  regenBackToPlan,
+} from '../../store/app.uts'
+import { goBack } from '../../utils/nav.uts'
+
+const percent = ref<number>(0)
+const skeletons: number[] = [1, 2, 3]
+let timer: number = 0
+
+const stages = computed<GenerateStage[]>((): GenerateStage[] => generateStages(COVERED_SCHOOLS))
+
+const percentText = computed<string>((): string => {
+  const p = percent.value
+  if (p < 33) return p.toString() + '% · 正在检索候选院校池'
+  if (p < 66) return p.toString() + '% · 正在校验分数线与统考名额'
+  return p.toString() + '% · 正在做偏好加权排序'
+})
+
+function stageState(i: number): string {
+  const p = percent.value
+  if (i === 0) return p >= 34 ? 'done' : 'active'
+  if (i === 1) return p >= 66 ? 'done' : p >= 34 ? 'active' : 'idle'
+  return p >= 96 ? 'done' : p >= 66 ? 'active' : 'idle'
+}
+
+function iconOf(i: number): string {
+  const s = stageState(i)
+  if (s === 'done') return 'checkCircle'
+  if (s === 'active') return 'stepActive'
+  return 'stepIdle'
+}
+
+function textClassOf(i: number): string {
+  const s = stageState(i)
+  if (s === 'active') return 'text-ink'
+  if (s === 'done') return 'text-ink2'
+  return 'text-ink3'
+}
+
+/** 兜底：允许从任意入口直接进入本页调试 */
+function ensureInput(): void {
+  if (examInfo.value == null) {
+    const exam: ExamInfo = {
+      region: 'A 区',
+      provinces: ['江苏', '上海'],
+      subjectCode: '085404',
+      subjectGroup: '政治+英语一+数学一+408',
+      tier: '双一流 · 一本',
+      major: '计算机科学与技术',
+      targetSchool: '南京大学',
+      isCross: false,
+      politics: 78,
+      foreign: 72,
+      course1: 118,
+      course1Name: '数学一',
+      course2: 121,
+      course2Name: '408',
+      total: 389,
+    }
+    examInfo.value = exam
+  }
+  if (preference.value == null) {
+    const pref: Preference = {
+      strategies: ['求稳上岸优先'],
+      regions: ['江浙沪'],
+      directions: ['计算机系统结构'],
+      careers: ['读博'],
+      degreeType: '不限',
+    }
+    preference.value = pref
+  }
+}
+
+function finish() {
+  ensureInput()
+  const exam: ExamInfo = examInfo.value != null ? examInfo.value : EMPTY_EXAM
+  const pref: Preference =
+    preference.value != null
+      ? preference.value
+      : { strategies: [], regions: [], directions: [], careers: [], degreeType: '不限' }
+
+  const plan = generatePlan(exam, pref, marks.value)
+  currentPlan.value = plan
+
+  // 从「调整方案」重生成 → 栈里已有一张 S05，回退复用它；
+  // 否则方案页会重复入栈，用户按返回会落到同一份方案的副本上、像是没反应。
+  if (regenBackToPlan.value) {
+    regenBackToPlan.value = false
+    uni.navigateBack({ delta: 1 })
+    return
+  }
+  uni.redirectTo({ url: '/pages/plan/plan' })
+}
+
+/** 取消生成并退回上一步；栈里只有本页时回落到偏好页，避免死胡同 */
+function cancel() {
+  if (timer !== 0) clearInterval(timer)
+  goBack('/pages/preference/preference')
+}
+
+onLoad(() => {
+  timer = setInterval(() => {
+    const next = percent.value + 4
+    if (next >= 100) {
+      percent.value = 100
+      if (timer !== 0) clearInterval(timer)
+      finish()
+    } else {
+      percent.value = next
+    }
+  }, 80)
+})
+
+onUnload(() => {
+  if (timer !== 0) clearInterval(timer)
+  // 「重生成回退」只对本次生成有效。无论本次是跑完还是被取消，离开本页即清掉，
+  // 避免这个标记残留到下一次从偏好页发起的生成。
+  regenBackToPlan.value = false
+})
+</script>

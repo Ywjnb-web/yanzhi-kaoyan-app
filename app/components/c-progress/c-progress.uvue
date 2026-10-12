@@ -1,0 +1,37 @@
+<template>
+  <view class="w-full bg-line overflow-hidden" :style="trackStyle">
+    <view class="h-full bg-ink" :style="fillStyle" />
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 进度 / 概率条
+ * 概率条只表达「区间上限」，区间文案由调用方以文字给出 —— 避免用户把条形
+ * 误读成确定值（PRD RK-04「上岸概率被质疑误导」的应对）。
+ */
+import { computed } from 'vue'
+
+const props = defineProps<{
+  /** 0 - 100 */
+  percent: number
+  /** 条高，默认 6px */
+  height?: number
+}>()
+
+const h = computed<number>((): number => (props.height != null ? props.height : 6))
+
+const trackStyle = computed<string>((): string => {
+  const v = h.value
+  return 'height:' + v.toString() + 'px;border-radius:' + (v / 2).toString() + 'px'
+})
+
+const fillStyle = computed<string>((): string => {
+  let p = props.percent
+  if (p < 0) p = 0
+  if (p > 100) p = 100
+  return (
+    'width:' + p.toString() + '%;height:100%;border-radius:' + (h.value / 2).toString() + 'px'
+  )
+})
+</script>

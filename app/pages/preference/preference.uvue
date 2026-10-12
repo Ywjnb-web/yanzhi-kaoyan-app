@@ -1,0 +1,168 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-nav-bar lead="back" title="兴趣偏好" @lead="back" />
+
+    <view class="w-full flex flex-col px-5 pb-10">
+      <!-- 步骤指示 -->
+      <view class="w-full flex flex-col pt-3">
+        <text class="w-full text-note font-medium text-ink2">第 2 步 / 共 3 步 · 兴趣偏好</text>
+        <view class="w-full mt-2">
+          <c-progress :percent="66" :height="4" />
+        </view>
+      </view>
+
+      <text class="w-full text-h2 font-bold text-ink mt-5">兴趣偏好（全部选填）</text>
+      <text class="w-full text-body text-ink2 mt-2"
+        >留空的维度将使用中性权重，并在方案中标注「该维度未参与加权」</text
+      >
+
+      <!-- 优先策略 -->
+      <text class="w-full text-lead font-semibold text-ink mt-6">优先策略</text>
+      <view class="w-full flex flex-row flex-wrap mt-3">
+        <view v-for="opt in strategies" :key="opt" class="mr-2.5 mb-2.5">
+          <c-chip :label="opt" :selected="has(pref.strategies, opt)" @press="toggleStrategy(opt)" />
+        </view>
+      </view>
+
+      <!-- 地域偏好 -->
+      <text class="w-full text-lead font-semibold text-ink mt-4">地域偏好</text>
+      <view class="w-full flex flex-row flex-wrap mt-3">
+        <view v-for="opt in regions" :key="opt" class="mr-2.5 mb-2.5">
+          <c-chip :label="opt" :selected="has(pref.regions, opt)" @press="toggleRegion(opt)" />
+        </view>
+      </view>
+
+      <!-- 研究方向偏好 -->
+      <text class="w-full text-lead font-semibold text-ink mt-4">研究方向偏好</text>
+      <view class="w-full flex flex-row flex-wrap mt-3">
+        <view v-for="opt in directions" :key="opt" class="mr-2.5 mb-2.5">
+          <c-chip :label="opt" :selected="has(pref.directions, opt)" @press="toggleDirection(opt)" />
+        </view>
+      </view>
+
+      <!-- 学业规划 -->
+      <text class="w-full text-lead font-semibold text-ink mt-4">学业规划</text>
+      <view class="w-full flex flex-row flex-wrap mt-3">
+        <view v-for="opt in careers" :key="opt" class="mr-2.5 mb-2.5">
+          <c-chip :label="opt" :selected="has(pref.careers, opt)" @press="toggleCareer(opt)" />
+        </view>
+      </view>
+
+      <!-- 学硕 / 专硕倾向（单选） -->
+      <text class="w-full text-lead font-semibold text-ink mt-4">学硕 / 专硕倾向</text>
+      <view class="w-full flex flex-row flex-wrap mt-3">
+        <view v-for="opt in degrees" :key="opt" class="mr-2.5 mb-2.5">
+          <c-chip :label="opt" :selected="pref.degreeType === opt" @press="setDegree(opt)" />
+        </view>
+      </view>
+
+      <!-- 加权状态提示 -->
+      <view class="w-full flex flex-col px-3.5 py-3 rounded-btn bg-fill mt-5">
+        <text class="w-full text-note font-medium text-ink">{{ weightHint }}</text>
+        <text class="w-full text-cap text-ink2 mt-1">偏好只影响排序权重，不影响任何事实数字。</text>
+      </view>
+
+      <view class="w-full mt-5">
+        <c-btn label="生成择校方案" variant="primary" size="lg" @press="submit" />
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S03 兴趣偏好采集　（FR-02）
+ *
+ * 全部选填。缺省时不报错、不追问，而是走「中性权重」并在结果页显式标注
+ * 「未使用偏好加权」—— 这是 PRD 明确验收的一条分支，页面里的提示条就是它的入口。
+ */
+import { computed, ref } from 'vue'
+import type { Preference } from '../../types/models.uts'
+import {
+  STRATEGY_OPTIONS,
+  REGION_OPTIONS,
+  DIRECTION_OPTIONS,
+  CAREER_OPTIONS,
+  DEGREE_OPTIONS,
+} from '../../constants/dictionary.uts'
+import { preference, disclaimerAccepted } from '../../store/app.uts'
+import { goBack } from '../../utils/nav.uts'
+
+const pref = ref<Preference>({
+  strategies: ['求稳上岸优先'],
+  regions: ['江浙沪'],
+  directions: ['计算机系统结构'],
+  careers: ['读博'],
+  degreeType: '不限',
+})
+
+const strategies = computed<string[]>((): string[] => STRATEGY_OPTIONS)
+const regions = computed<string[]>((): string[] => REGION_OPTIONS)
+const directions = computed<string[]>((): string[] => DIRECTION_OPTIONS)
+const careers = computed<string[]>((): string[] => CAREER_OPTIONS)
+const degrees = computed<string[]>((): string[] => DEGREE_OPTIONS)
+
+/** 返回上一步（考生信息）；栈里只有本页时同样回落到第 1 步，避免死胡同 */
+function back() {
+  goBack('/pages/exam-info/exam-info')
+}
+
+function has(list: string[], v: string): boolean {
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === v) return true
+  }
+  return false
+}
+
+/** 多选：再点一次即取消 */
+function toggleIn(list: string[], v: string): string[] {
+  const out: string[] = []
+  let found = false
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === v) {
+      found = true
+    } else {
+      out.push(list[i])
+    }
+  }
+  if (!found) out.push(v)
+  return out
+}
+
+function toggleStrategy(v: string) {
+  pref.value.strategies = toggleIn(pref.value.strategies, v)
+}
+function toggleRegion(v: string) {
+  pref.value.regions = toggleIn(pref.value.regions, v)
+}
+function toggleDirection(v: string) {
+  pref.value.directions = toggleIn(pref.value.directions, v)
+}
+function toggleCareer(v: string) {
+  pref.value.careers = toggleIn(pref.value.careers, v)
+}
+function setDegree(v: string) {
+  pref.value.degreeType = v
+}
+
+const weightHint = computed<string>((): string => {
+  const p = pref.value
+  const n =
+    p.strategies.length + p.regions.length + p.directions.length + p.careers.length
+  if (n === 0 && p.degreeType === '不限') {
+    return '当前未选择任何偏好 —— 将按中性权重生成，并在方案中标注「未使用偏好加权」'
+  }
+  return '已选择 ' + n.toString() + ' 项偏好，将计入排序权重'
+})
+
+function submit() {
+  preference.value = pref.value
+  // 两条分支都用 navigateTo：本页要留在栈里，这样 S05 方案页按返回时能退回本页
+  // （此前 accepted 分支用 redirectTo 会把本页顶掉，导致方案页的返回落到 S02）。
+  if (disclaimerAccepted.value) {
+    uni.navigateTo({ url: '/pages/generating/generating' })
+  } else {
+    uni.navigateTo({ url: '/pages/disclaimer/disclaimer' })
+  }
+}
+</script>

@@ -1,0 +1,126 @@
+<template>
+  <view class="w-full flex flex-col bg-white">
+    <c-nav-bar lead="close" title="导出方案" right="PNG / PDF" @lead="close" />
+
+    <view class="w-full flex flex-col px-5 pb-10">
+      <!-- 预览占位 -->
+      <view class="w-full h-[200px] rounded-card bg-fill mt-3 flex flex-col items-center justify-center">
+        <text class="text-note text-ink3">方案导出预览</text>
+      </view>
+
+      <!-- 格式选项 -->
+      <view
+        class="w-full flex flex-row items-center justify-between px-3.5 h-[52px] rounded-btn border border-solid bg-white mt-4"
+        :class="format === 'png' ? 'border-ink' : 'border-line'"
+        @click="setFormat('png')"
+      >
+        <text class="flex-1 text-sub font-medium text-ink">导出为图片（PNG，适合分享）</text>
+        <view
+          class="w-[20px] h-[20px] rounded-full border border-solid flex flex-row items-center justify-center"
+          :class="format === 'png' ? 'bg-ink border-ink' : 'bg-white border-ink3'"
+        >
+          <c-icon v-if="format === 'png'" name="tick" :size="12" />
+        </view>
+      </view>
+
+      <view
+        class="w-full flex flex-row items-center justify-between px-3.5 h-[52px] rounded-btn border border-solid bg-white mt-2.5"
+        :class="format === 'pdf' ? 'border-ink' : 'border-line'"
+        @click="setFormat('pdf')"
+      >
+        <text class="flex-1 text-sub font-medium text-ink">导出为 PDF（长图，适合作档）</text>
+        <view
+          class="w-[20px] h-[20px] rounded-full border border-solid flex flex-row items-center justify-center"
+          :class="format === 'pdf' ? 'bg-ink border-ink' : 'bg-white border-ink3'"
+        >
+          <c-icon v-if="format === 'pdf'" name="tick" :size="12" />
+        </view>
+      </view>
+
+      <!-- 免责声明为必含项，因此这里不是「可选项」而是「保证项」 -->
+      <view class="w-full flex flex-row items-center mt-4">
+        <view class="w-[20px] h-[20px] rounded-md bg-ink flex flex-row items-center justify-center">
+          <c-icon name="tick" :size="12" />
+        </view>
+        <text class="flex-1 text-body text-ink ml-2.5">包含免责声明与数据来源年份</text>
+        <text class="text-cap text-ink3">必需</text>
+      </view>
+
+      <!-- 分享 -->
+      <text class="w-full text-body font-semibold text-ink mt-6">分享</text>
+      <view class="w-full flex flex-row flex-wrap mt-2.5">
+        <view class="mr-2 mb-2">
+          <c-chip label="分享到微信" size="sm" @press="share('微信')" />
+        </view>
+        <view class="mr-2 mb-2">
+          <c-chip label="保存到相册" size="sm" @press="share('相册')" />
+        </view>
+        <view class="mr-2 mb-2">
+          <c-chip label="复制链接" size="sm" @press="share('链接')" />
+        </view>
+      </view>
+
+      <view class="w-full mt-5">
+        <c-btn label="导出" variant="primary" size="lg" @press="doExport" />
+      </view>
+
+      <text class="w-full text-cap text-ink3 mt-3"
+        >导出物含免责声明与数据来源年份，不含任何个人敏感信息（成绩已脱敏）。</text
+      >
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * S09 方案导出 / 分享　（FR-07）
+ *
+ * 与线框图的一处**刻意偏离**：线框图把「包含免责声明」画成了可勾选框，
+ * 但 FR-07 的验收标准要求导出物**必须**含免责声明与来源年份 ——
+ * 所以这里渲染为已勾选且锁定（右侧标注「必需」），而不是给用户一个
+ * 关掉合规信息的开关。
+ */
+import { computed, ref } from 'vue'
+import { currentPlan } from '../../store/app.uts'
+import { goBack } from '../../utils/nav.uts'
+
+const format = ref<string>('png')
+
+const planName = computed<string>((): string => {
+  const p = currentPlan.value
+  return p != null ? p.name : '择校方案'
+})
+
+function setFormat(v: string) {
+  format.value = v
+}
+
+function share(channel: string) {
+  uni.showToast({ title: '已调起分享：' + channel, icon: 'none' })
+}
+
+function doExport() {
+  // 线上：生成图片/PDF 后调用 uni.saveImageToPhotosAlbum / uni.openDocument
+  uni.showLoading({ title: '正在生成…' })
+  setTimeout(() => {
+    uni.hideLoading()
+    uni.showModal({
+      title: '导出完成',
+      content:
+        '《' +
+        planName.value +
+        '》已导出为 ' +
+        format.value.toUpperCase() +
+        '，文件中已包含免责声明与数据来源年份。',
+      showCancel: false,
+      success: () => {
+        goBack('/pages/plan/plan')
+      },
+    })
+  }, 900)
+}
+
+function close() {
+  goBack('/pages/plan/plan')
+}
+</script>

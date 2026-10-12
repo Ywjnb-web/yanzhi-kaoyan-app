@@ -1,0 +1,461 @@
+/**
+ * 数据访问层（本地同步实现）
+ *
+ * 线上形态：uni.request + 域名白名单（manifest 已关闭 urlCheck 仅为本地调试）。
+ * 当前形态：本地 Mock + 本地缓存，用于跑通主链路。
+ *
+ * 约定：**所有数字只在本层与 services/ 之间流转，页面层只渲染。**
+ *
+ * ══ api/ 目录分工（接后端时按此对照） ══
+ *   index.uts     ← 你在这里。同步实现：本地假数据 + 本地缓存。
+ *                   **即使接入真后端也请保留** —— 断网时它是页面唯一的降级路径。
+ *   config.uts    ← 环境开关（USE_MOCK / BASE_URL）、设备 ID、令牌读写。
+ *   endpoints.uts ← 接口路径常量，与后端契约 §8「接口一览表」一一对应。
+ *   http.uts      ← 统一请求封装：响应包解包、错误码翻译、401 自动刷新重试。
+ *   remote.uts    ← 异步接口层，与后端契约 DTO 对齐。页面迁到真后端时改调它。
+ *
+ * 后端契约见 `deliverables/backend/API-契约-研志-V1.0.md`，
+ * 建表脚本见 `deliverables/backend/schema-v1.0.sql`。
+ */
+import type {
+  ExamForm,
+  ExamInfo,
+  Preference,
+  PlanVO,
+  ItemFeedback,
+  SearchItem,
+  ProgramRecord,
+  MarkRecord,
+} from '../types/models.uts'
+import { PROGRAMS, SCHOOL_LEVELS } from '../mock/programs.uts'
+import { SUBJECT_GROUPS, regionLabelOfProvinces, DATA_VERSION } from '../constants/dictionary.uts'
+import { buildPlan } from '../services/plan-engine.uts'
+import { formatNow } from '../utils/format.uts'
+
+const KEY_PLANS = 'yanzhi.plans'
+const KEY_DRAFT = 'yanzhi.examDraft'
+const KEY_DRAFT_TOTAL = 'yanzhi.examDraftTotal'
+
+/* ══════════════════════════════════════════════════════════════
+   分数解析与校验（EX-01 / EX-02）
+   ══════════════════════════════════════════════════════════════ */
+
+/** 只接受纯数字，非法返回 -1。不用 parseInt + isNaN，避免端上对 NaN 的处理差异。 */
+export function toScore(raw: string): number {
+  if (raw.length === 0) return -1
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw.charCodeAt(i)
+    if (c < 48 || c > 57) return -1
+  }
+  return parseInt(raw)
+}
+
+function fullMarkOfGroup(form: ExamForm): number[] {
+  for (let i = 0; i < SUBJECT_GROUPS.length; i++) {
+    if (SUBJECT_GROUPS[i].label === form.subjectGroup) {
+      return [100, 100, 150, 150]
+    }
+  }
+  return [100, 100, 150, 150]
+}
+
+/** 6 位纯数字（专业代码形态）。沿用 charCode 判定，避开端上正则实现差异。 */
+export function isSixDigits(raw: string): boolean {
+  if (raw.length !== 6) return false
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw.charCodeAt(i)
+    if (c < 48 || c > 57) return false
+  }
+  return true
+}
+
+/**
+ * 必填校验（EX-01 + 满分越界）。
+ * 返回空数组表示通过。页面据此高亮缺失项并阻断生成。
+ */
+export function validateExam(form: ExamForm): string[] {
+  const errors: string[] = []
+  if (form.provinces.length === 0) {
+    errors.push('意向省份未选择（先选 A / B 区，再勾选省份）')
+  }
+  if (form.subjectCode.length === 0) {
+    errors.push('报考科目代码未填写')
+  } else if (!isSixDigits(form.subjectCode)) {
+    errors.push('报考科目代码应为 6 位数字，如 085401')
+  }
+  if (form.subjectGroup.length === 0) errors.push('初试科目组合未选择')
+  if (form.tier.length === 0) errors.push('本科院校层次未选择')
+  if (form.major.length === 0) errors.push('本科专业未填写')
+
+  const scores: number[] = [
+    toScore(form.politics),
+    toScore(form.foreign),
+    toScore(form.course1),
+    toScore(form.course2),
+  ]
+  const names: string[] = ['政治', '外国语', '业务课一', '业务课二']
+  const full = fullMarkOfGroup(form)
+
+  for (let i = 0; i < scores.length; i++) {
+    if (scores[i] < 0) {
+      errors.push(names[i] + '成绩未填写或含非数字字符')
+    } else if (scores[i] > full[i]) {
+      errors.push(names[i] + '成绩超过满分 ' + full[i].toString() + ' 分')
+    }
+  }
+  return errors
+}
+
+/** 组装提交态：计算总分，映射 A/B 区 */
+export function composeExam(form: ExamForm): ExamInfo {
+  let course1Name = '业务课一'
+  let course2Name = '业务课二'
+  for (let i = 0; i < SUBJECT_GROUPS.length; i++) {
+    if (SUBJECT_GROUPS[i].label === form.subjectGroup) {
+      course1Name = SUBJECT_GROUPS[i].course1Name
+      course2Name = SUBJECT_GROUPS[i].course2Name
+      break
+    }
+  }
+  const politics = Math.max(toScore(form.politics), 0)
+  const foreign = Math.max(toScore(form.foreign), 0)
+  const course1 = Math.max(toScore(form.course1), 0)
+  const course2 = Math.max(toScore(form.course2), 0)
+
+  // 复制一份省份数组，避免提交态与表单态共享同一个引用
+  const picked: string[] = []
+  for (let i = 0; i < form.provinces.length; i++) picked.push(form.provinces[i])
+
+  const info: ExamInfo = {
+    region: regionLabelOfProvinces(picked),
+    provinces: picked,
+    subjectCode: form.subjectCode,
+    subjectGroup: form.subjectGroup,
+    tier: form.tier,
+    major: form.major,
+    targetSchool: form.targetSchool,
+    isCross: form.isCross,
+    politics: politics,
+    foreign: foreign,
+    course1: course1,
+    course1Name: course1Name,
+    course2: course2,
+    course2Name: course2Name,
+    total: politics + foreign + course1 + course2,
+  }
+  return info
+}
+
+/** EX-02：声明的总分与各科之和不一致时返回差额，否则返回 0 */
+export function crossCheckTotal(declared: number, computed: number): number {
+  return declared - computed
+}
+
+/* ══════════════════════════════════════════════════════════════
+   生成方案
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * 本地生成方案（同步）。
+ *
+ * 线上由后端异步任务承担：`remote.uts` 的 submitGenerate() 提交 → fetchGenerateTask()
+ * 轮询（POST /plans/generate → GET /plans/generate-tasks/{taskId}）。
+ * 走异步是因为大模型排序耗时不可控，且 S04 生成中页面本身要分三段展示进度。
+ */
+export function generatePlan(
+  exam: ExamInfo,
+  pref: Preference,
+  marks: MarkRecord[],
+): PlanVO {
+  return buildPlan(exam, pref, marks)
+}
+
+/** 生成阶段的进度文案，供 S04 逐步展示 */
+export interface GenerateStage {
+  label: string
+  detail: string
+}
+
+export function generateStages(schoolCount: number): GenerateStage[] {
+  return [
+    { label: '检索候选院校池', detail: '(' + schoolCount.toString() + ' 所)' },
+    { label: '校验分数线与统考名额', detail: '数据库 ' + DATA_VERSION + ' 版' },
+    { label: '大模型生成冲 / 稳 / 保排序', detail: '' },
+  ]
+}
+
+/* ══════════════════════════════════════════════════════════════
+   院校检索（FR-03）
+   ══════════════════════════════════════════════════════════════ */
+
+function levelOf(university: string): string {
+  for (let i = 0; i < SCHOOL_LEVELS.length; i++) {
+    if (SCHOOL_LEVELS[i].university === university) return SCHOOL_LEVELS[i].level
+  }
+  return '—'
+}
+
+function matchChip(p: ProgramRecord, chip: string): boolean {
+  if (chip === '全部') return true
+  if (chip === '计算机') return p.majorClass === '计算机类'
+  if (chip === '江苏') return p.province === '江苏'
+  if (chip === '985') return levelOf(p.university) === '985'
+  return true
+}
+
+function matchKeyword(p: ProgramRecord, keyword: string): boolean {
+  if (keyword.length === 0) return true
+  if (p.university.indexOf(keyword) >= 0) return true
+  if (p.major.indexOf(keyword) >= 0) return true
+  if (p.department.indexOf(keyword) >= 0) return true
+  if (p.province.indexOf(keyword) >= 0) return true
+  return false
+}
+
+function toSearchItem(p: ProgramRecord): SearchItem {
+  const quota = p.planTotal - p.recommendedQuota
+  const item: SearchItem = {
+    id: p.id,
+    university: p.university + ' · ' + p.province,
+    province: p.province,
+    region: p.region,
+    major: p.major + ' · ' + p.degreeType,
+    degreeType: p.degreeType,
+    // 数据缺失时字段留空，由页面渲染「暂无数据」（EX-03）
+    quota: p.noData ? '' : '统考 ' + quota.toString() + ' 人',
+    scoreLine: p.noData ? '' : '复试线 ' + p.scoreLines[2].toString() + '（2025）',
+    applyRatio: p.noData ? '' : '报录比 ' + p.applyRatios[2].toString() + ':1',
+    noData: p.noData,
+  }
+  return item
+}
+
+export function searchPrograms(keyword: string, chip: string): SearchItem[] {
+  const out: SearchItem[] = []
+  for (let i = 0; i < PROGRAMS.length; i++) {
+    const p = PROGRAMS[i]
+    if (!matchChip(p, chip)) continue
+    if (!matchKeyword(p, keyword)) continue
+    if (out.length >= 20) break
+    out.push(toSearchItem(p))
+  }
+  return out
+}
+
+/* ══════════════════════════════════════════════════════════════
+   目标院校检索（FR-01 选填项 / EX-03）
+   ══════════════════════════════════════════════════════════════ */
+
+export interface SchoolOption {
+  university: string
+  province: string
+  region: string
+  level: string
+}
+
+function schoolOptionOf(name: string, level: string): SchoolOption {
+  let province = ''
+  let region = ''
+  for (let i = 0; i < PROGRAMS.length; i++) {
+    if (PROGRAMS[i].university === name) {
+      province = PROGRAMS[i].province
+      region = PROGRAMS[i].region
+      break
+    }
+  }
+  const opt: SchoolOption = {
+    university: name,
+    province: province,
+    region: region,
+    level: level,
+  }
+  return opt
+}
+
+/**
+ * 关键词检索院校 —— **只返回院校库内已收录的院校**。
+ * 召回为空即意味着该院校暂无数据，页面据此提示 EX-03，绝不臆造一条出来。
+ */
+export function suggestSchools(keyword: string): SchoolOption[] {
+  const out: SchoolOption[] = []
+  for (let i = 0; i < SCHOOL_LEVELS.length; i++) {
+    const name = SCHOOL_LEVELS[i].university
+    if (keyword.length > 0 && name.indexOf(keyword) < 0) continue
+    out.push(schoolOptionOf(name, SCHOOL_LEVELS[i].level))
+  }
+  return out
+}
+
+/** 精确匹配库内院校；不在库内返回 null。用于判定「已纳入库内匹配 / 库内暂无数据」 */
+export function findSchool(name: string): SchoolOption | null {
+  if (name.length === 0) return null
+  for (let i = 0; i < SCHOOL_LEVELS.length; i++) {
+    if (SCHOOL_LEVELS[i].university === name) {
+      return schoolOptionOf(name, SCHOOL_LEVELS[i].level)
+    }
+  }
+  return null
+}
+
+/* ══════════════════════════════════════════════════════════════
+   方案持久化（FR-07 / FR-10 游客本地保存）
+   ══════════════════════════════════════════════════════════════ */
+
+export function listPlans(): PlanVO[] {
+  const raw = uni.getStorageSync(KEY_PLANS)
+  if (raw == null) return []
+  const text = raw as string
+  if (text.length === 0) return []
+  try {
+    const parsed = JSON.parse(text)
+    return parsed as PlanVO[]
+  } catch (e) {
+    return []
+  }
+}
+
+export function persistPlans(plans: PlanVO[]) {
+  uni.setStorageSync(KEY_PLANS, JSON.stringify(plans))
+}
+
+/** 保存方案；同 id 覆盖，否则插入到最前 */
+export function savePlan(plan: PlanVO): PlanVO[] {
+  const list = listPlans()
+  const next: PlanVO[] = [plan]
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].id !== plan.id) {
+      next.push(list[i])
+    }
+  }
+  persistPlans(next)
+  return next
+}
+
+export function removePlan(planId: string): PlanVO[] {
+  const list = listPlans()
+  const next: PlanVO[] = []
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].id !== planId) next.push(list[i])
+  }
+  persistPlans(next)
+  return next
+}
+
+/** FR-10：注销/删除我的数据 —— 清空本地全部产物 */
+export function clearAllLocalData() {
+  uni.removeStorageSync(KEY_PLANS)
+  uni.removeStorageSync(KEY_DRAFT)
+  uni.removeStorageSync(KEY_DRAFT_TOTAL)
+}
+
+/* ══════════════════════════════════════════════════════════════
+   弱网草稿（EX-08）
+   ══════════════════════════════════════════════════════════════ */
+
+export function saveExamDraft(form: ExamForm, total: number) {
+  uni.setStorageSync(KEY_DRAFT, JSON.stringify(form))
+  uni.setStorageSync(KEY_DRAFT_TOTAL, total.toString())
+}
+
+/**
+ * 早期版本的草稿只存了单个 `province`，没有 `provinces` / `subjectCode` /
+ * `targetSchool`。字段全部可选，读取时统一补默认值，避免升级后旧缓存
+ * 让页面在 `form.provinces.length` 这类访问上直接报错。
+ */
+interface DraftExamForm {
+  provinces?: string[]
+  province?: string
+  subjectCode?: string
+  subjectGroup?: string
+  tier?: string
+  major?: string
+  targetSchool?: string
+  isCross?: boolean
+  politics?: string
+  foreign?: string
+  course1?: string
+  course2?: string
+}
+
+function normalizeDraft(src: DraftExamForm): ExamForm {
+  const out: ExamForm = {
+    provinces: [],
+    subjectCode: '',
+    subjectGroup: '',
+    tier: '',
+    major: '',
+    targetSchool: '',
+    isCross: false,
+    politics: '',
+    foreign: '',
+    course1: '',
+    course2: '',
+  }
+  const list = src.provinces
+  if (list != null) {
+    for (let i = 0; i < list.length; i++) out.provinces.push(list[i])
+  } else if (src.province != null && src.province.length > 0) {
+    // 旧草稿的单个省份 → 升级为多选数组
+    out.provinces.push(src.province)
+  }
+  if (src.subjectCode != null) out.subjectCode = src.subjectCode
+  if (src.subjectGroup != null) out.subjectGroup = src.subjectGroup
+  if (src.tier != null) out.tier = src.tier
+  if (src.major != null) out.major = src.major
+  if (src.targetSchool != null) out.targetSchool = src.targetSchool
+  if (src.isCross != null) out.isCross = src.isCross
+  if (src.politics != null) out.politics = src.politics
+  if (src.foreign != null) out.foreign = src.foreign
+  if (src.course1 != null) out.course1 = src.course1
+  if (src.course2 != null) out.course2 = src.course2
+  return out
+}
+
+export function loadExamDraft(): ExamForm | null {
+  const raw = uni.getStorageSync(KEY_DRAFT)
+  if (raw == null) return null
+  const text = raw as string
+  if (text.length === 0) return null
+  try {
+    const parsed = JSON.parse(text)
+    return normalizeDraft(parsed as DraftExamForm)
+  } catch (e) {
+    return null
+  }
+}
+
+/** 草稿里记录的总分 —— 用于比对，触发 EX-02 */
+export function loadDraftTotal(): number {
+  const raw = uni.getStorageSync(KEY_DRAFT_TOTAL)
+  if (raw == null) return 0
+  return toScore(raw as string)
+}
+
+export function clearExamDraft() {
+  uni.removeStorageSync(KEY_DRAFT)
+  uni.removeStorageSync(KEY_DRAFT_TOTAL)
+}
+
+/* ══════════════════════════════════════════════════════════════
+   反馈（FR-09）
+   ══════════════════════════════════════════════════════════════ */
+
+/** 反馈必须关联 方案 ID + 数据版本，便于归因与复现（附录 A.6） */
+export function submitFeedback(
+  itemId: string,
+  planId: string,
+  kind: string,
+  reason: string,
+): ItemFeedback {
+  const fb: ItemFeedback = {
+    itemId: itemId,
+    planId: planId,
+    kind: kind,
+    reason: reason,
+    dataVersion: DATA_VERSION,
+    createdAt: formatNow(),
+  }
+  // 线上：改调 remote.uts 的 submitFeedbackRemote()（POST /feedbacks）
+  console.log('[feedback]', JSON.stringify(fb))
+  return fb
+}
