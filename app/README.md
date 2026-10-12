@@ -40,7 +40,7 @@ HBuilderX 编译 ──► unpackage/dist/dev/mp-weixin ──► 微信开发�
 
 uni-app x 编译到微信小程序后走 **VDOM 渲染模式（基于 glass-easel 组件框架）**。
 
-- 页面/组件的注册入口是 `wx.createPage` / `wx.createComponent`，由 **uni-app x 运行时**  
+- 页面/组件的注册入口是 `wx.createPage` / `wx.createComponent`，由 **uni-app x 运行时** 
   在 `common/vendor.js` 中挂到 `wx` 上（`wx.createPage = createPage`），其内部调用  
   glass-easel 的 `Component(...)` 完成注册。
 - 同时 WXML 由 **glass-easel 编译器**产出（含 `change:*` 指令与 `uniView.wxs`）。
@@ -268,55 +268,56 @@ S00 首页 →「开始择校」→ S02 考生信息 → S03 兴趣偏好
   `<c-nav-bar lead="back|close" @lead="…">`，并通过 `goBack()` 指向逻辑上的上一步  
   （而不是硬依赖 `navigateBack` 的栈顺序）。
 
+
 ## 八、后端接口预留
 
-后端采用 **DDD + MVC 融合** 架构（Spring Boot 3 · Java 17 · MyBatis-Plus · PostgreSQL）。
+后端采用 **DDD + MVC 融合** 架构（Spring Boot 3 · Java 17 · MyBatis-Plus · PostgreSQL）。  
 契约与建表脚本在工作区上一级：
 
-| 文件 | 内容 |
-| --- | --- |
+| 文件                                       | 内容                     |
+| ---------------------------------------- | ---------------------- |
 | `deliverables/backend/API-契约-研志-V1.0.md` | 31 个接口清单、DTO、错误码表、分层落法 |
-| `deliverables/backend/schema-v1.0.sql` | 建表脚本（聚合边界即表边界）、索引、视图 |
+| `deliverables/backend/schema-v1.0.sql`   | 建表脚本（聚合边界即表边界）、索引、视图   |
 
 ### 8.1 api/ 目录的五文件分工
 
-| 文件 | 职责 |
-| --- | --- |
-| `config.uts` | **接入真后端的唯一开关**：`USE_MOCK`、`BASE_URL`、超时、设备 ID、令牌读写 |
-| `endpoints.uts` | 31 个路径常量 + 带参路径构造器，页面里不出现裸 URL |
-| `http.uts` | 注入 `Authorization` / `X-Device-Id` / `Idempotency-Key`；解包统一响应体；错误码翻译成中文；40102 自动刷新令牌并重试一次 |
-| `remote.uts` | 异步接口层，返回类型与 `types/models.uts` 对齐 |
-| `index.uts` | 同步实现（本地假数据 + 本地缓存）。**接后端后不要删** —— 断网时它是页面唯一的降级路径 |
+| 文件              | 职责                                                                                        |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| `config.uts`    | **接入真后端的唯一开关**：`USE_MOCK`、`BASE_URL`、超时、设备 ID、令牌读写                                        |
+| `endpoints.uts` | 31 个路径常量 + 带参路径构造器，页面里不出现裸 URL                                                            |
+| `http.uts`      | 注入 `Authorization` / `X-Device-Id` / `Idempotency-Key`；解包统一响应体；错误码翻译成中文；40102 自动刷新令牌并重试一次 |
+| `remote.uts`    | 异步接口层，返回类型与 `types/models.uts` 对齐                                                         |
+| `index.uts`     | 同步实现（本地假数据 + 本地缓存）。**接后端后不要删** —— 断网时它是页面唯一的降级路径                                          |
 
 ### 8.2 切换步骤
 
 1. `api/config.uts`：`USE_MOCK` 置 `false`，`BASE_URL` 填真实网关。
 2. 微信公众平台「开发设置 → 服务器域名」登记 `request` 合法域名（必须 HTTPS）。
-3. 逐页把同步调用换成 `await` 异步版，建议顺序：**检索页 → 生成链路 → 我的方案 → 反馈**。
+3. 逐页把同步调用换成 `await` 异步版，建议顺序：**检索页 → 生成链路 → 我的方案 → 反馈**。  
    从只读的开始换，写链路留最后，避免中途出现半同步半异步的难查问题。
 
 ### 8.3 同步函数 → 接口对照
 
-| 现状（同步） | 替换为 | 备注 |
-| --- | --- | --- |
-| `generatePlan` | `POST /plans/generate` + 轮询 | 改异步任务；大模型耗时不可控，且 S04 要分三段展示进度 |
-| `generateStages` | 轮询响应 | 直接读服务端 `stageLabel` / `stageDetail`，端上不再硬编码文案 |
-| `searchPrograms` | `GET /catalog/programs` | 改分页 + `await` |
-| `suggestSchools` / `findSchool` | `GET /catalog/schools` | 调用点加 300ms 防抖 |
-| `listPlans` / `savePlan` / `removePlan` | `GET` / `POST` / `DELETE /plans` | 本地缓存**保留**为离线兜底，网络优先 |
-| `submitFeedback` | `POST /feedbacks` | 失败入本地队列重试，不弹错误打断用户 |
-| `validateExam` | `POST /exam-profile/validate` | 本地快速校验保留，提交前再调服务端二次校验 |
-| `saveExamDraft` / `loadExamDraft` | 无（仍本地） | 弱网草稿不依赖网络；登录后由 `PUT /exam-profile` 同步 |
-| `constants/dictionary.uts` | `GET /meta/dictionaries` | 首次启动拉取并缓存，失败回落硬编码常量 |
-| `mock/programs.uts` | 院校目录只读接口 | — |
-| `manifest.json → mp-weixin.appid` | — | 填你的小程序 AppID |
+| 现状（同步）                                  | 替换为                              | 备注                                            |
+| --------------------------------------- | -------------------------------- | --------------------------------------------- |
+| `generatePlan`                          | `POST /plans/generate` + 轮询      | 改异步任务；大模型耗时不可控，且 S04 要分三段展示进度                 |
+| `generateStages`                        | 轮询响应                             | 直接读服务端 `stageLabel` / `stageDetail`，端上不再硬编码文案 |
+| `searchPrograms`                        | `GET /catalog/programs`          | 改分页 + `await`                                 |
+| `suggestSchools` / `findSchool`         | `GET /catalog/schools`           | 调用点加 300ms 防抖                                 |
+| `listPlans` / `savePlan` / `removePlan` | `GET` / `POST` / `DELETE /plans` | 本地缓存**保留**为离线兜底，网络优先                          |
+| `submitFeedback`                        | `POST /feedbacks`                | 失败入本地队列重试，不弹错误打断用户                            |
+| `validateExam`                          | `POST /exam-profile/validate`    | 本地快速校验保留，提交前再调服务端二次校验                         |
+| `saveExamDraft` / `loadExamDraft`       | 无（仍本地）                           | 弱网草稿不依赖网络；登录后由 `PUT /exam-profile` 同步         |
+| `constants/dictionary.uts`              | `GET /meta/dictionaries`         | 首次启动拉取并缓存，失败回落硬编码常量                           |
+| `mock/programs.uts`                     | 院校目录只读接口                         | —                                             |
+| `manifest.json → mp-weixin.appid`       | —                                | 填你的小程序 AppID                                  |
 
 ### 8.4 三条不能破的约定
 
 1. **`dataVersion` 必须随反馈一起上报**。没有它就分不清是数据错还是模型排序错。
-2. **`noData = true` 时不做任何估算**。服务端返回空串，页面渲染「暂无数据」（EX-03）。
+2. **`noData = true` 时不做任何估算**。服务端返回空串，页面渲染「暂无数据」（EX-03）。  
    这是产品红线，不是技术选择。
-3. **数值响应必须带 `dataNature` / `sourceNote`**。`demo` 期间页面强制展示
+3. **数值响应必须带 `dataNature` / `sourceNote`**。`demo` 期间页面强制展示  
    「演示数据 · 非院校官方发布」；取得院校授权后才能置 `official`。
 
 > `urlCheck: false` 仅为本地调试；上线前必须改回严格域名校验。
@@ -338,14 +339,14 @@ S00 首页 →「开始择校」→ S02 考生信息 → S03 兴趣偏好
 
 ### 运行阶段常见报错速查
 
-| 现象                              | 原因                | 处理                                                                    |
-| ------------------------------- | ----------------- | --------------------------------------------------------------------- |
-| HBuilderX 报「运行到微信开发者工具失败」       | 微信开发者工具没开**服务端口** | 开发者工具 → 设置 → 安全设置 → 打开服务端口                                            |
-| 微信开发者工具里一片空白 / 报 `app.json 未找到` | 编译未完成，或打开错目录      | 等 HBuilderX 控制台出现「编译成功」；确认打开的是 `unpackage/dist/dev/mp-weixin` 而不是源码目录 |
-| **模拟器纯白屏、控制台无红字** | ① `manifest.json` 的 `mp-weixin` 缺 `componentFramework: "glass-easel"` → `wx.createPage` 未定义，页面从未创建；② **微信开发者工具 < `1.06.2308142`** → 基础库无法激活 glass-easel 运行时，**中断渲染**（本次真实根因） | ① 确认 manifest 已开 glass-easel；② **升级微信开发者工具到最新 Stable**（旧版 1.05.x 从「关于」无法自更新，需官网重新下载）；③ `工具`→`清缓存`→`全部清除`，再全量重编译 |  
-| 报 `sitemap.json 未找到`，但文件确实存在 | 开发者工具在 `sitemap.json` 生成**之前**加载了项目，把校验错误缓存了下来 | `工具`→`清缓存`→`全部清除`，再 `Ctrl+B` 重编译 |  
-| Tailwind 类名完全不生效 | HBuilderX < 5.11，或 `main.css` 没被 `App.uvue` 引入 | 升级 HBuilderX；确认 `App.uvue` 的 `<style>` 里有 `@import './main.css'` |  
-| 控制台报 `Cannot send network request to localhost` / `ws://192.168.x.x:8090 不在以下 socket 合法域名列表中` | **不是本项目发出的请求**。这是 HBuilderX「运行日志回显」把小程序 `console` 回传 IDE 的 websocket 通道，与本工程代码无关 —— `USE_MOCK = true` 时 `api/` 是纯本地透传，**零网络调用**；`remote.uts` 也只有被页面实际调用后才会发请求 | 开发者工具 → `详情` → `本地设置` → 勾选**「不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书」**；或在 HBuilderX `设置 → 运行配置` 里关掉「运行日志回显」 |
+| 现象                                                                                            | 原因                                                                                                                                                                           | 处理                                                                                                                   |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| HBuilderX 报「运行到微信开发者工具失败」                                                                     | 微信开发者工具没开**服务端口**                                                                                                                                                            | 开发者工具 → 设置 → 安全设置 → 打开服务端口                                                                                           |
+| 微信开发者工具里一片空白 / 报 `app.json 未找到`                                                               | 编译未完成，或打开错目录                                                                                                                                                                 | 等 HBuilderX 控制台出现「编译成功」；确认打开的是 `unpackage/dist/dev/mp-weixin` 而不是源码目录                                                |
+| **模拟器纯白屏、控制台无红字**                                                                             | ① `manifest.json` 的 `mp-weixin` 缺 `componentFramework: "glass-easel"` → `wx.createPage` 未定义，页面从未创建；② **微信开发者工具 < `1.06.2308142`** → 基础库无法激活 glass-easel 运行时，**中断渲染**（本次真实根因） | ① 确认 manifest 已开 glass-easel；② **升级微信开发者工具到最新 Stable**（旧版 1.05.x 从「关于」无法自更新，需官网重新下载）；③ `工具`→`清缓存`→`全部清除`，再全量重编译      |
+| 报 `sitemap.json 未找到`，但文件确实存在                                                                  | 开发者工具在 `sitemap.json` 生成**之前**加载了项目，把校验错误缓存了下来                                                                                                                               | `工具`→`清缓存`→`全部清除`，再 `Ctrl+B` 重编译                                                                                     |
+| Tailwind 类名完全不生效                                                                              | HBuilderX < 5.11，或 `main.css` 没被 `App.uvue` 引入                                                                                                                               | 升级 HBuilderX；确认 `App.uvue` 的 `<style>` 里有 `@import './main.css'`                                                     |
+| 控制台报 `Cannot send network request to localhost` / `ws://192.168.x.x:8090 不在以下 socket 合法域名列表中` | **不是本项目发出的请求**。这是 HBuilderX「运行日志回显」把小程序 `console` 回传 IDE 的 websocket 通道，与本工程代码无关 —— `USE_MOCK = true` 时 `api/` 是纯本地透传，**零网络调用**；`remote.uts` 也只有被页面实际调用后才会发请求                | 开发者工具 → `详情` → `本地设置` → 勾&#x9009;**「不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书」**；或在 HBuilderX `设置 → 运行配置` 里关掉「运行日志回显」 |
 
 ---
 
@@ -353,13 +354,13 @@ S00 首页 →「开始择校」→ S02 考生信息 → S03 兴趣偏好
 
 本工程遵循**数据双轨制**：
 
-| 类别 | 字段 | 性质 |
-| --- | --- | --- |
-| **真实公开信息** | 院校名称、院系名称、专业名称、专业代码 | 可查证，用于标识 |
-| **演示数值** | 复试线、报录比、复录比、招生计划、推免人数、学费 | **演示数据，非院校官方发布，不得用于实际报考决策** |
+| 类别         | 字段                       | 性质                          |
+| ---------- | ------------------------ | --------------------------- |
+| **真实公开信息** | 院校名称、院系名称、专业名称、专业代码      | 可查证，用于标识                    |
+| **演示数值**   | 复试线、报录比、复录比、招生计划、推免人数、学费 | **演示数据，非院校官方发布，不得用于实际报考决策** |
 
-凡展示上述数值的页面，必须同时出现「演示数据 · 非院校官方发布」字样。
+凡展示上述数值的页面，必须同时出现「演示数据 · 非院校官方发布」字样。  
 接入真后端后，该标识由接口返回的 `dataNature` / `sourceNote` 驱动（见「八、后端接口预留」）。
 
-合规声明：本产品不提供任何录取保证；上岸概率为基于历史数据的估算区间，非承诺。
+合规声明：本产品不提供任何录取保证；上岸概率为基于历史数据的估算区间，非承诺。  
 最终报考信息请以各招生单位官方发布的招生章程与专业目录为准。
