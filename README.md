@@ -43,6 +43,9 @@ yanzhi-kaoyan-app/
         ├── API-契约-研志-V1.0.md                   # 后端 REST 接口契约（31 个接口）
         └── schema-v1.0.sql                         # PostgreSQL 建表脚本
 ```
+<img width="554" height="1211" alt="image" src="https://github.com/user-attachments/assets/17b9bfcf-9f6e-4b81-b541-bbea392414a6" />
+<img width="520" height="1026" alt="image" src="https://github.com/user-attachments/assets/4974a7e9-f135-45ef-98ed-5ac316c427fa" />
+<img width="552" height="1147" alt="image" src="https://github.com/user-attachments/assets/58693ae2-f370-4e2e-acb8-7942212ca9f0" />
 
 ---
 
